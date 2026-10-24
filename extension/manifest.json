@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "NDM 下载助手",
+  "version": "0.2.0",
+  "description": "拦截浏览器下载交给 NDM 多线程加速下载；支持 OpenList 当前文件夹批量下载",
+  "permissions": [
+    "downloads",
+    "contextMenus",
+    "cookies",
+    "storage",
+    "alarms",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "NDM 下载助手",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "32": "icons/icon32.png",
+      "64": "icons/icon64.png"
+    }
+  },
+  "icons": {
+    "32": "icons/icon32.png",
+    "64": "icons/icon64.png",
+    "128": "icons/icon128.png"
+  }
+}

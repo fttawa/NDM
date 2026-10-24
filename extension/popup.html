@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <img src="icons/icon64.png" alt="" />
+      <div>
+        <div class="title">NDM 下载助手</div>
+        <div id="status" class="status">正在连接…</div>
+      </div>
+    </header>
+
+    <section id="openlist" class="ol" hidden>
+      <div class="ol-title"><span id="olKind">OpenList</span> · 当前文件夹</div>
+      <div class="ol-btns">
+        <button id="olHere">下载当前文件夹</button>
+        <button id="olDeep">包含子文件夹</button>
+      </div>
+      <div id="olMsg" class="ol-msg"></div>
+    </section>
+
+    <label class="row">
+      <span>拦截浏览器下载</span>
+      <input type="checkbox" id="enabled" class="switch" />
+    </label>
+
+    <div class="field">
+      <label for="minSizeKB">最小文件大小（KB，0 为不限）</label>
+      <input id="minSizeKB" type="number" min="0" step="1" />
+    </div>
+
+    <div class="field">
+      <label for="types">只拦截这些类型（留空为全部）</label>
+      <input id="types" placeholder="zip rar 7z exe msi iso mp4 mkv" />
+    </div>
+
+    <div class="field">
+      <label for="excludeSites">不拦截的网站</label>
+      <textarea id="excludeSites" rows="2" placeholder="example.com"></textarea>
+    </div>
+
+    <p class="hint">右键链接或图片/视频可选择「使用 NDM 下载」。NDM 未运行时自动交还浏览器下载。</p>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
