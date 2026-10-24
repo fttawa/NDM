@@ -857,6 +857,15 @@ button {
   opacity: 1;
   pointer-events: auto;
 }
+/* 抽屉打开时直接模糊背后的界面（不依赖 backdrop-filter，WebView2 透明窗口下它不一定生效） */
+.app .sidebar,
+.app .content {
+  transition: filter 0.3s;
+}
+.app:has(.drawer.show) .sidebar,
+.app:has(.drawer.show) .content {
+  filter: blur(14px) brightness(0.7);
+}
 .drawer {
   position: fixed;
   top: 10px;

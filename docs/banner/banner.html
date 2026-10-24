@@ -1,0 +1,114 @@
+<!doctype html>
+<!-- README 头图源文件：用无头 Edge 截图生成 docs/banner.png（1280×560，2 倍分辨率） -->
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1280px; height: 560px; overflow: hidden; background: #0d0d0e; }
+  body {
+    position: relative;
+    font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    color: #ededed;
+  }
+  /* 背景：几块柔和的灰色形状，被上层玻璃糊开 */
+  .blob { position: absolute; border-radius: 50%; }
+  .b1 { width: 620px; height: 620px; left: 640px; top: -260px; background: #4a4a4e; }
+  .b2 { width: 420px; height: 420px; left: 980px; top: 300px; background: #2a2a2c; }
+  .b3 { width: 520px; height: 300px; left: -120px; top: 380px; background: #1f1f21; }
+  .stripes {
+    position: absolute; inset: 0;
+    background: repeating-linear-gradient(115deg, transparent 0 46px, rgba(255,255,255,.035) 46px 47px);
+  }
+  .frost {
+    position: absolute; inset: 0;
+    backdrop-filter: blur(90px) saturate(120%);
+    background: rgba(13, 13, 14, .35);
+  }
+  /* 胶片颗粒 */
+  .grain {
+    position: absolute; inset: 0; opacity: .5; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .5  0 0 0 0 .5  0 0 0 0 .5  0 0 0 .9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
+
+  .left { position: absolute; left: 88px; top: 0; bottom: 0; width: 600px; display: flex; flex-direction: column; justify-content: center; }
+  .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 34px; }
+  .brand img { width: 52px; height: 52px; }
+  .brand b { font-size: 26px; letter-spacing: .06em; }
+  .brand span { font-size: 14px; color: #8a8a8a; border: 1px solid rgba(255,255,255,.12); border-radius: 99px; padding: 3px 10px; }
+  h1 { font-size: 54px; line-height: 1.22; font-weight: 800; letter-spacing: .02em; }
+  h1 em { font-style: normal; color: #9a9a9a; }
+  .sub { margin-top: 22px; font-size: 18px; color: #a1a1a1; letter-spacing: .04em; }
+  .tags { margin-top: 30px; display: flex; gap: 10px; }
+  .tags span { font-size: 14px; color: #c8c8c8; padding: 7px 14px; border-radius: 10px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.08); }
+
+  /* 右侧：玻璃质感的任务卡片 */
+  .card {
+    position: absolute; right: 80px; top: 92px; width: 440px;
+    padding: 26px; border-radius: 26px;
+    background: rgba(48, 48, 50, .42);
+    border: 1px solid rgba(255,255,255,.1);
+    backdrop-filter: blur(30px) saturate(150%);
+  }
+  .card.back { right: 52px; top: 70px; width: 440px; height: 380px; background: rgba(40,40,42,.3); transform: rotate(4deg); }
+  .row { display: flex; align-items: center; gap: 14px; }
+  .ico { width: 46px; height: 46px; border-radius: 13px; background: rgba(255,255,255,.08); display: grid; place-items: center; }
+  .name { white-space: nowrap; font-size: 17px; font-weight: 700; }
+  .meta { font-size: 13px; color: #8a8a8a; margin-top: 4px; }
+  .chip { white-space: nowrap; margin-left: auto; font-size: 12px; padding: 4px 10px; border-radius: 8px; background: rgba(255,255,255,.1); }
+  .pct { margin-top: 26px; display: flex; align-items: baseline; justify-content: space-between; }
+  .pct b { font-size: 40px; font-weight: 800; }
+  .pct span { color: #8a8a8a; font-size: 14px; }
+  .seg { margin-top: 14px; height: 14px; display: flex; gap: 3px; }
+  .seg i { flex: 1; border-radius: 3px; background: rgba(255,255,255,.08); position: relative; overflow: hidden; }
+  .seg i::after { content: ""; position: absolute; inset: 0; width: var(--p); background: #d4d4d4; border-radius: 3px; }
+  .chart { margin-top: 22px; height: 92px; }
+  .stats { margin-top: 16px; display: grid; grid-template-columns: repeat(3, 1fr); }
+  .stats div { font-size: 12px; color: #8a8a8a; }
+  .stats b { display: block; margin-top: 4px; font-size: 16px; color: #ededed; }
+</style>
+</head>
+<body>
+  <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+  <div class="stripes"></div>
+  <div class="frost"></div>
+
+  <div class="card back"></div>
+  <div class="card">
+    <div class="row">
+      <div class="ico">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#d4d4d4" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+      </div>
+      <div>
+        <div class="name">ubuntu-24.04-desktop.iso</div>
+        <div class="meta">5.7 GB · 32 连接</div>
+      </div>
+      <div class="chip">下载中</div>
+    </div>
+    <div class="pct"><b>68.4%</b><span>3.9 GB / 5.7 GB</span></div>
+    <div class="seg" id="seg"></div>
+    <svg class="chart" viewBox="0 0 388 92" preserveAspectRatio="none" width="388">
+      <path d="M0 80 C 30 78, 45 40, 70 36 S 110 52, 140 44 S 190 18, 220 22 S 270 40, 300 30 S 350 14, 388 18 L 388 92 L 0 92 Z" fill="rgba(255,255,255,.07)"/>
+      <path d="M0 80 C 30 78, 45 40, 70 36 S 110 52, 140 44 S 190 18, 220 22 S 270 40, 300 30 S 350 14, 388 18" fill="none" stroke="#d4d4d4" stroke-width="2"/>
+    </svg>
+    <div class="stats">
+      <div>速度<b>48.6 MB/s</b></div>
+      <div>剩余<b>37 秒</b></div>
+      <div>分段<b>32</b></div>
+    </div>
+  </div>
+
+  <div class="left">
+    <div class="brand"><img src="../../public/app-icon.svg" /><b>NDM</b><span>v0.2.0</span></div>
+    <h1>你的下一代<br />开源<em>高速</em>下载器</h1>
+    <div class="sub">多线程分段 · 动态分段 · 断点续传 · 浏览器接管</div>
+    <div class="tags"><span>Tauri 2</span><span>Rust</span><span>Windows</span><span>Chrome / Edge</span></div>
+  </div>
+
+  <div class="grain"></div>
+  <script>
+    const p = [100, 100, 92, 100, 64, 100, 81, 47, 100, 73, 100, 38, 88, 100, 55, 29];
+    document.getElementById("seg").innerHTML = p.map((v) => `<i style="--p:${v}%"></i>`).join("");
+  </script>
+</body>
+</html>
