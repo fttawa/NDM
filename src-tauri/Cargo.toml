@@ -1,6 +1,6 @@
 [package]
 name = "ndm"
-version = "0.2.0"
+version = "0.2.1"
 description = "NDM - 多线程下载管理器"
 edition = "2021"
 
