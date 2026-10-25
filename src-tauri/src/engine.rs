@@ -135,7 +135,7 @@ impl ActiveRt {
         let ms = (d.as_millis() as u32).max(1);
         let _ = self
             .latency_ms
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |old| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |old| {
                 Some(if old == 0 {
                     ms
                 } else {
@@ -178,7 +178,7 @@ impl ActiveRt {
     fn retire(&self) -> bool {
         let target = self.target.load(Ordering::Acquire);
         self.workers
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |w| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |w| {
                 (w > target).then(|| w - 1)
             })
             .is_ok()
