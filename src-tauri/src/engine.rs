@@ -25,6 +25,24 @@ const MAX_RETRIES: u32 = 5;
 /// 超频检查周期
 const OVERCLOCK_TICK: Duration = Duration::from_millis(150);
 
+fn atomic_try_update(
+    atom: &AtomicU32,
+    set_order: Ordering,
+    load_order: Ordering,
+    mut update: impl FnMut(u32) -> Option<u32>,
+) -> Result<u32, u32> {
+    let mut old = atom.load(load_order);
+    loop {
+        let Some(new) = update(old) else {
+            return Err(old);
+        };
+        match atom.compare_exchange_weak(old, new, set_order, load_order) {
+            Ok(_) => return Ok(old),
+            Err(actual) => old = actual,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum DlError {
     Cancelled,
@@ -133,15 +151,18 @@ impl ActiveRt {
     /// 记录一次请求延迟（指数平滑）
     fn record_latency(&self, d: Duration) {
         let ms = (d.as_millis() as u32).max(1);
-        let _ = self
-            .latency_ms
-            .try_update(Ordering::AcqRel, Ordering::Acquire, |old| {
+        let _ = atomic_try_update(
+            &self.latency_ms,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+            |old| {
                 Some(if old == 0 {
                     ms
                 } else {
                     (old * 7 + ms * 3) / 10
                 })
-            });
+            },
+        );
     }
 
     /// 当前超频连接数
@@ -177,11 +198,10 @@ impl ActiveRt {
     /// 连接数超过常规值时让出一个名额（超频连接就位后，多出的连接传完当前分段即退出）
     fn retire(&self) -> bool {
         let target = self.target.load(Ordering::Acquire);
-        self.workers
-            .try_update(Ordering::AcqRel, Ordering::Acquire, |w| {
-                (w > target).then(|| w - 1)
-            })
-            .is_ok()
+        atomic_try_update(&self.workers, Ordering::AcqRel, Ordering::Acquire, |w| {
+            (w > target).then(|| w - 1)
+        })
+        .is_ok()
     }
 
     pub fn downloaded(&self) -> u64 {
