@@ -5,7 +5,7 @@ import { bytes, extractUrls } from "../lib/format";
 import { useStore } from "../store";
 import { Slider, Switch } from "./ui";
 
-function Modal({ open, onClose, children, width = 560 }: { open: boolean; onClose: () => void; children: React.ReactNode; width?: number }) {
+export function Modal({ open, onClose, children, width = 560 }: { open: boolean; onClose: () => void; children: React.ReactNode; width?: number }) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();

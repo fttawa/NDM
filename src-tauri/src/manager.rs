@@ -3,7 +3,7 @@
 use crate::engine::{self, ActiveRt, DlError};
 use crate::limiter::Limiter;
 use crate::model::{now_ms, Progress, Settings, Status, Task};
-use crate::storage::Storage;
+use crate::storage::{ExportBundle, Storage};
 use crate::util;
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
@@ -25,6 +25,7 @@ pub struct Manager {
     client: RwLock<reqwest::Client>,
     pub limiter: Limiter,
     storage: Storage,
+    pending_import: Mutex<Option<(String, ExportBundle)>>,
 }
 
 pub struct AddOptions {
@@ -84,6 +85,7 @@ impl Manager {
         };
         std::fs::create_dir_all(&data_dir)?;
 
+        crate::diagnostics::init(&data_dir);
         let storage = Storage::open(data_dir.join("state.db"))?;
         let mut settings: Settings = match storage.load_settings()? {
             Some(settings) => settings,
@@ -146,6 +148,7 @@ impl Manager {
             persist_lock: Mutex::new(()),
             app,
             storage,
+            pending_import: Mutex::new(None),
         }))
     }
 
@@ -160,30 +163,77 @@ impl Manager {
     }
 
     pub fn export_data(&self, path: &Path) -> Result<(), String> {
+        self.persist();
+        let _guard = self.persist_lock.lock();
         self.storage
             .export_bundle(path)
             .map_err(|e| format!("导出失败：{e}"))
     }
 
-    pub fn import_data(self: &Arc<Self>, path: &Path) -> Result<(), String> {
-        if !self.active.lock().is_empty() {
-            return Err("请先暂停所有下载，再导入数据".into());
+    pub fn preview_import(&self, path: &Path) -> Result<serde_json::Value, String> {
+        let bundle = Storage::read_bundle(path).map_err(|e| format!("备份无效：{e}"))?;
+        build_client(&bundle.settings)?;
+        let old = serde_json::to_value(self.settings()).map_err(|e| e.to_string())?;
+        let new = serde_json::to_value(&bundle.settings).map_err(|e| e.to_string())?;
+        let changes: Vec<String> = new
+            .as_object()
+            .unwrap()
+            .iter()
+            .filter(|(key, value)| old.get(*key) != Some(*value))
+            .map(|(key, _)| key.clone())
+            .collect();
+        let ticket = uuid::Uuid::new_v4().to_string();
+        let preview = serde_json::json!({"ticket":ticket,"taskCount":bundle.tasks.len(),"currentCount":self.tasks.lock().len(),"settingsChanges":changes});
+        *self.pending_import.lock() = Some((ticket, bundle));
+        Ok(preview)
+    }
+
+    pub fn import_data(self: &Arc<Self>, ticket: String) -> Result<String, String> {
+        let _persist = self.persist_lock.lock();
+        let active = self.active.lock();
+        if !active.is_empty() {
+            return Err("请先暂停所有下载，等待连接退出后再导入".into());
         }
-        let bundle = Storage::read_bundle(path).map_err(|e| format!("导入失败：{e}"))?;
-        let _ = build_client(&bundle.settings)?;
-        {
-            let mut tasks = self.tasks.lock();
-            *tasks = bundle.tasks;
-            for task in tasks.iter_mut() {
-                task.speed = 0;
-                task.active_conns = 0;
-                task.boost = 0;
+        let mut pending = self.pending_import.lock();
+        let (expected, bundle) = pending.as_mut().ok_or("请先预览备份")?;
+        if *expected != ticket {
+            return Err("备份预览已失效，请重新选择".into());
+        }
+        bundle.settings.max_concurrent = bundle.settings.max_concurrent.clamp(1, 16);
+        bundle.settings.connections = bundle.settings.connections.clamp(1, 32);
+        let client = build_client(&bundle.settings)?;
+        let mut tasks = self.tasks.lock();
+        for task in &mut bundle.tasks {
+            task.speed = 0;
+            task.active_conns = 0;
+            task.boost = 0;
+            task.connections = task.connections.clamp(1, 32);
+            if matches!(task.status, Status::Active | Status::Waiting) {
+                task.status = Status::Paused;
             }
         }
-        self.set_settings(bundle.settings)?;
-        self.persist();
+        let backup = self
+            .storage
+            .replace_bundle(
+                bundle,
+                &ExportBundle {
+                    version: 2,
+                    settings: self.settings(),
+                    tasks: tasks.clone(),
+                },
+            )
+            .map_err(|e| format!("导入失败，数据未替换：{e}"))?;
+        *tasks = bundle.tasks.clone();
+        *self.settings.write() = bundle.settings.clone();
+        *self.client.write() = client;
+        self.limiter
+            .set_rate(bundle.settings.speed_limit.saturating_mul(1024));
+        *pending = None;
+        drop(tasks);
+        drop(active);
+        drop(_persist);
         self.emit_tasks();
-        Ok(())
+        Ok(backup.to_string_lossy().into_owned())
     }
 
     pub fn client(&self) -> reqwest::Client {
@@ -227,6 +277,7 @@ impl Manager {
 
     /// 把运行中任务的分段进度同步回任务列表并写盘
     pub fn persist(&self) {
+        let _persist = self.persist_lock.lock();
         let actives: Vec<(String, Arc<ActiveRt>)> = self
             .active
             .lock()
@@ -245,20 +296,14 @@ impl Manager {
             }
             tasks.clone()
         };
-        let _persist = self.persist_lock.lock();
         if let Err(e) = self.storage.save_tasks(&tasks) {
+            crate::diagnostics::record("tasks_save_failed");
             eprintln!("保存任务失败：{e}");
         }
     }
 
-    fn save_settings(&self) {
-        let _persist = self.persist_lock.lock();
-        if let Err(e) = self.storage.save_settings(&self.settings.read()) {
-            eprintln!("保存设置失败：{e}");
-        }
-    }
-
     pub fn set_settings(self: &Arc<Self>, mut s: Settings) -> Result<Settings, String> {
+        let guard = self.persist_lock.lock();
         s.max_concurrent = s.max_concurrent.clamp(1, 16);
         s.connections = s.connections.clamp(1, 32);
         s.proxy_url = s.proxy_url.trim().to_string();
@@ -268,14 +313,20 @@ impl Manager {
                 || s.proxy_mode != cur.proxy_mode
                 || s.proxy_url != cur.proxy_url
         };
-        if net_changed {
-            // 先构建成功再替换，地址无效时保持原设置不变
-            let client = build_client(&s)?;
+        let client = if net_changed {
+            Some(build_client(&s)?)
+        } else {
+            None
+        };
+        self.storage
+            .save_settings(&s)
+            .map_err(|e| format!("保存设置失败：{e}"))?;
+        if let Some(client) = client {
             *self.client.write() = client;
         }
-        self.limiter.set_rate(s.speed_limit * 1024);
+        self.limiter.set_rate(s.speed_limit.saturating_mul(1024));
         *self.settings.write() = s.clone();
-        self.save_settings();
+        drop(guard);
         self.schedule();
         Ok(s)
     }
@@ -337,6 +388,7 @@ impl Manager {
                         }
                     }
                     Err(e) => {
+                        crate::diagnostics::record("download_failed");
                         t.status = Status::Error;
                         t.error = Some(e.to_string());
                     }

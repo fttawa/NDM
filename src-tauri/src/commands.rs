@@ -87,8 +87,25 @@ pub fn export_data(m: M, path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn import_data(m: M, path: String) -> Result<(), String> {
-    m.import_data(Path::new(&path))
+pub fn preview_import(m: M, path: String) -> Result<serde_json::Value, String> {
+    m.preview_import(Path::new(&path))
+}
+
+#[tauri::command]
+pub fn import_data(
+    app: AppHandle,
+    m: M,
+    bridge: State<'_, Arc<Bridge>>,
+    ticket: String,
+) -> Result<String, String> {
+    let backup = m.import_data(ticket)?;
+    if m.settings().browser_integration {
+        bridge.start(m.inner().clone());
+    } else {
+        bridge.stop();
+    }
+    refresh_glass(&app);
+    Ok(backup)
 }
 
 /// 随安装包附带的浏览器扩展目录（开发模式下为项目内的 extension 目录）
@@ -261,5 +278,76 @@ pub fn apply_glass(window: &WebviewWindow, mode: &str) {
     };
     if let Err(e) = result {
         eprintln!("设置窗口效果失败: {e}");
+    }
+}
+
+#[tauri::command]
+pub fn export_diagnostics(m: M, path: String) -> Result<(), String> {
+    let tasks: Vec<_> = m.snapshot().iter().enumerate().map(|(index,t)| serde_json::json!({
+        "index":index,"status":t.status,"downloaded":t.downloaded,"total":t.total,
+        "connections":t.connections,"segmented":!t.segments.is_empty(),"hasError":t.error.is_some()
+    })).collect();
+    let report = serde_json::json!({"version":env!("CARGO_PKG_VERSION"),"os":std::env::consts::OS,
+        "arch":std::env::consts::ARCH,"tasks":tasks,"events":crate::diagnostics::events()});
+    std::fs::write(
+        path,
+        serde_json::to_vec_pretty(&report).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn check_update(m: M<'_>) -> Result<serde_json::Value, String> {
+    let response = m
+        .client()
+        .get("https://api.github.com/repos/fttawa/NDM/releases/latest")
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "NDM-update-check")
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|_| "无法连接更新服务，请检查网络或代理".to_string())?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "更新服务返回 HTTP {}，请稍后重试",
+            response.status().as_u16()
+        ));
+    }
+    let release: serde_json::Value =
+        serde_json::from_slice(&response.bytes().await.map_err(|_| "读取更新信息失败")?)
+            .map_err(|_| "更新信息格式无效")?;
+    let tag = release["tag_name"].as_str().ok_or("缺少版本号")?;
+    let newer =
+        version_tuple(tag).ok_or("版本号无效")? > version_tuple(env!("CARGO_PKG_VERSION")).unwrap();
+    Ok(
+        serde_json::json!({"version":tag,"available":newer,"notes":release["body"].as_str().unwrap_or(""),
+        "url":format!("https://github.com/fttawa/NDM/releases/tag/{tag}")}),
+    )
+}
+
+fn version_tuple(version: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = version.trim_start_matches('v').split('.');
+    let value = (
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+    );
+    if parts.next().is_some() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+    #[test]
+    fn compares_numeric_versions() {
+        assert!(version_tuple("v0.2.10") > version_tuple("0.2.9"));
+        assert_eq!(version_tuple("v0.2.2"), version_tuple("0.2.2"));
+        assert!(version_tuple("1.2.3.4").is_none());
+        assert!(version_tuple("1.2.3-beta").is_none());
+        assert!(version_tuple("bad-version").is_none());
     }
 }

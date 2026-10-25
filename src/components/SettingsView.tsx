@@ -11,9 +11,17 @@ function GithubMark({ size = 14 }: { size?: number }) {
   );
 }
 import { useEffect, useState } from "react";
-import { api, pickDirectory, pickExportPath, pickImportPath, writeClipboard, type BridgeStatus, type Settings } from "../lib/api";
+import { api, pickDirectory, pickExportPath, pickImportPath, writeClipboard, type ImportPreview, type UpdateInfo, type BridgeStatus, type Settings } from "../lib/api";
 import { useStore } from "../store";
 import { Segmented, Slider, Switch } from "./ui";
+import { Modal } from "./Modals";
+
+const settingLabels: Record<keyof Settings, string> = {
+  downloadDir: "默认下载目录", maxConcurrent: "同时下载任务数", connections: "每任务连接数",
+  speedLimit: "全局限速", userAgent: "User-Agent", notify: "完成通知", clipboardWatch: "剪贴板监听",
+  closeToTray: "关闭到托盘", resumeOnStart: "启动时继续下载", glass: "窗口材质",
+  browserIntegration: "浏览器集成", captureConfirm: "下载确认框", proxyMode: "代理模式", proxyUrl: "代理地址", overclock: "连接超频",
+};
 
 function Tile({ icon, title, desc, className = "", children }: { icon: React.ReactNode; title: string; desc?: string; className?: string; children: React.ReactNode }) {
   return (
@@ -33,6 +41,11 @@ function Tile({ icon, title, desc, className = "", children }: { icon: React.Rea
 export function SettingsView() {
   const settings = useStore((s) => s.settings);
   const save = useStore((s) => s.saveSettings);
+  const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [updateError, setUpdateError] = useState("");
   const [ua, setUa] = useState("");
   const [limit, setLimit] = useState("0");
   const [proxyUrl, setProxyUrl] = useState("");
@@ -304,9 +317,7 @@ export function SettingsView() {
                   try {
                     const path = await pickImportPath();
                     if (path) {
-                      await api.importData(path);
-                      await useStore.getState().reload();
-                      showToast("数据已导入");
+                      setPreview(await api.previewImport(path));
                     }
                   } catch (e) {
                     showToast(String(e));
@@ -316,6 +327,34 @@ export function SettingsView() {
                 导入
               </button>
             </div>
+          </div>
+        </Tile>
+
+        <Tile icon={<Globe size={18} />} title="更新与诊断" desc="手动检查新版本，导出排错信息" className="span-2">
+          <div className="set-row">
+            <span className="muted small">当前版本 {__APP_VERSION__}</span>
+            <button className="btn glass" disabled={checking} onClick={async () => {
+              setChecking(true); setUpdateError(""); setUpdate(null);
+              try { setUpdate(await api.checkUpdate()); } catch (e) { setUpdateError(String(e)); }
+              finally { setChecking(false); }
+            }}>{checking ? "检查中…" : "检查更新"}</button>
+          </div>
+          {updateError && <p role="alert" className="err">{updateError}</p>}
+          {update && <div>
+            <p>{update.available ? `发现新版本 ${update.version}` : "当前已是最新版本"}</p>
+            {update.available && <>
+              <p className="muted small" style={{ whiteSpace: "pre-wrap", maxHeight: 220, overflow: "auto", overflowWrap: "anywhere" }}>{update.notes}</p>
+              <button className="btn glass" onClick={() => api.openUrl(update.url).catch(e => showToast(String(e)))}>查看版本并下载安装包</button>
+            </>}
+          </div>}
+          <div className="set-row">
+            <span className="muted small">诊断包含版本、任务状态和事件记录，不包含链接、Cookie、密码或文件名。</span>
+            <button className="btn glass" onClick={async () => {
+              try {
+                const path = await pickExportPath("ndm-diagnostics.json");
+                if (path) { await api.exportDiagnostics(path); showToast("诊断信息已导出"); }
+              } catch (e) { showToast(String(e)); }
+            }}>导出诊断</button>
           </div>
         </Tile>
 
@@ -332,6 +371,27 @@ export function SettingsView() {
           </div>
         </div>
       </section>
+      <Modal open={!!preview} onClose={() => !importing && setPreview(null)} width={520}>
+        <div className="modal-head"><div><h2>确认恢复备份</h2><p className="muted">当前任务和设置会被备份中的内容替换。</p></div></div>
+        {preview && <>
+          <p>当前 {preview.currentCount} 个任务 → 备份 {preview.taskCount} 个任务。</p>
+          <p>设置变更：{preview.settingsChanges.map(k => settingLabels[k] ?? k).join("、") || "无"}。</p>
+          <p className="muted small">替换前会自动保存当前数据备份。导入的未完成任务保持暂停，不移动或删除下载文件。</p>
+        </>}
+        <div className="modal-foot">
+          <button className="btn glass" disabled={importing} onClick={() => setPreview(null)}>取消</button>
+          <button className="btn solid" disabled={importing} onClick={async () => {
+            if (!preview) return;
+            setImporting(true);
+            try {
+              const backup = await api.importData(preview.ticket);
+              await useStore.getState().reload(); setPreview(null);
+              showToast(`已恢复，原数据备份：${backup}`);
+            } catch (e) { showToast(String(e)); }
+            finally { setImporting(false); }
+          }}>{importing ? "恢复中…" : "备份当前数据并恢复"}</button>
+        </div>
+      </Modal>
     </div>
   );
 }

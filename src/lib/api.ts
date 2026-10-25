@@ -89,6 +89,20 @@ export interface BatchPayload {
   truncated: boolean;
 }
 
+export interface ImportPreview {
+  ticket: string;
+  taskCount: number;
+  currentCount: number;
+  settingsChanges: (keyof Settings)[];
+}
+
+export interface UpdateInfo {
+  version: string;
+  available: boolean;
+  notes: string;
+  url: string;
+}
+
 export interface BridgeStatus {
   running: boolean;
   port: number;
@@ -154,7 +168,10 @@ export const api = {
   onGlass: (cb: (g: Settings["glass"]) => void) => backend.on("ndm://glass", cb),
   bridgeStatus: () => backend.call<BridgeStatus>("bridge_status"),
   exportData: (path: string) => backend.call<void>("export_data", { path }),
-  importData: (path: string) => backend.call<void>("import_data", { path }),
+  previewImport: (path: string) => backend.call<ImportPreview>("preview_import", { path }),
+  importData: (ticket: string) => backend.call<string>("import_data", { ticket }),
+  exportDiagnostics: (path: string) => backend.call<void>("export_diagnostics", { path }),
+  checkUpdate: () => backend.call<UpdateInfo>("check_update"),
   extensionDir: () => backend.call<string>("extension_dir"),
   getCapture: (id: string) => backend.call<CapturePayload | null>("get_capture", { id }),
   getBatch: (id: string) => backend.call<BatchPayload | null>("get_batch", { id }),
@@ -473,6 +490,8 @@ function createMock(): Backend {
           return settings.glass as never;
         case "bridge_status":
           return { running: settings.browserIntegration, port: 16800, error: null } as never;
+        case "check_update":
+          return { version: __APP_VERSION__, available: false, notes: "预览模式", url: "https://github.com/fttawa/NDM/releases" } as never;
         case "extension_dir":
           return "E:\NDM\extension" as never;
         case "test_proxy":

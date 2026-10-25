@@ -1,6 +1,7 @@
 mod bridge;
 mod capture;
 mod commands;
+mod diagnostics;
 mod engine;
 mod limiter;
 mod manager;
@@ -134,6 +135,9 @@ pub fn run() {
             commands::bridge_status,
             commands::export_data,
             commands::import_data,
+            commands::preview_import,
+            commands::export_diagnostics,
+            commands::check_update,
             commands::effective_glass,
             capture::get_capture,
             capture::get_batch,
