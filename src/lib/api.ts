@@ -153,6 +153,8 @@ export const api = {
   effectiveGlass: () => backend.call<Settings["glass"]>("effective_glass"),
   onGlass: (cb: (g: Settings["glass"]) => void) => backend.on("ndm://glass", cb),
   bridgeStatus: () => backend.call<BridgeStatus>("bridge_status"),
+  exportData: (path: string) => backend.call<void>("export_data", { path }),
+  importData: (path: string) => backend.call<void>("import_data", { path }),
   extensionDir: () => backend.call<string>("extension_dir"),
   getCapture: (id: string) => backend.call<CapturePayload | null>("get_capture", { id }),
   getBatch: (id: string) => backend.call<BatchPayload | null>("get_batch", { id }),
@@ -168,6 +170,20 @@ export async function pickDirectory(defaultPath?: string): Promise<string | null
   if (!isTauri) return null;
   const { open } = await import("@tauri-apps/plugin-dialog");
   const r = await open({ directory: true, defaultPath });
+  return typeof r === "string" ? r : null;
+}
+
+export async function pickExportPath(defaultPath?: string): Promise<string | null> {
+  if (!isTauri) return null;
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const r = await save({ defaultPath, filters: [{ name: "NDM 数据备份", extensions: ["json"] }] });
+  return typeof r === "string" ? r : null;
+}
+
+export async function pickImportPath(): Promise<string | null> {
+  if (!isTauri) return null;
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const r = await open({ multiple: false, filters: [{ name: "NDM 数据备份", extensions: ["json"] }] });
   return typeof r === "string" ? r : null;
 }
 

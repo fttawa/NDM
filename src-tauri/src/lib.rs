@@ -5,6 +5,7 @@ mod engine;
 mod limiter;
 mod manager;
 mod model;
+mod storage;
 mod util;
 
 use manager::Manager;
@@ -71,7 +72,9 @@ pub fn run() {
     let mut builder = tauri::Builder::default();
     // 指定独立数据目录（测试实例）时不做单实例限制
     if std::env::var_os("NDM_DATA_DIR").is_none() {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)));
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main(app)
+        }));
     }
     let app = builder
         .plugin(tauri_plugin_dialog::init())
@@ -94,6 +97,9 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| match event {
+            WindowEvent::Destroyed if capture::is_capture_window(window.label()) => {
+                capture::cleanup_window(window)
+            }
             // 以下行为只针对主窗口；下载确认卡片正常关闭
             _ if window.label() != "main" => {}
             WindowEvent::CloseRequested { api, .. } => {
@@ -126,6 +132,8 @@ pub fn run() {
             commands::disk_info,
             commands::test_proxy,
             commands::bridge_status,
+            commands::export_data,
+            commands::import_data,
             commands::effective_glass,
             capture::get_capture,
             capture::get_batch,

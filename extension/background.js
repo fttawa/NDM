@@ -34,6 +34,8 @@ async function cookiesFor(url) {
 }
 
 async function sendToNdm({ url, referrer, filename, fileSize }) {
+  const alive = await ping();
+  if (!alive?.token) throw new Error("NDM 未授权");
   const body = {
     url,
     referrer: referrer || "",
@@ -44,7 +46,7 @@ async function sendToNdm({ url, referrer, filename, fileSize }) {
   };
   const r = await fetch(`${await ndmBase()}/add`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-NDM-Token": alive.token },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(4000),
   });
@@ -142,9 +144,11 @@ async function downloadOpenList(tab, recursive) {
   if (!res || res.error) return { error: res?.error || "读取文件列表失败" };
   if (!res.items.length) return { error: recursive ? "当前文件夹（含子文件夹）没有文件" : "当前文件夹没有文件" };
   try {
+    const alive = await ping();
+    if (!alive?.token) return { error: "NDM 未授权，请重试" };
     const r = await fetch(`${await ndmBase()}/batch`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-NDM-Token": alive.token },
       body: JSON.stringify({ source: "openlist", title: res.title, referrer: tab.url, items: res.items, truncated: res.truncated }),
       signal: AbortSignal.timeout(8000),
     });

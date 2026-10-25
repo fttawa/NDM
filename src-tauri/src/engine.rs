@@ -133,9 +133,15 @@ impl ActiveRt {
     /// 记录一次请求延迟（指数平滑）
     fn record_latency(&self, d: Duration) {
         let ms = (d.as_millis() as u32).max(1);
-        let _ = self.latency_ms.fetch_update(Ordering::AcqRel, Ordering::Acquire, |old| {
-            Some(if old == 0 { ms } else { (old * 7 + ms * 3) / 10 })
-        });
+        let _ = self
+            .latency_ms
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |old| {
+                Some(if old == 0 {
+                    ms
+                } else {
+                    (old * 7 + ms * 3) / 10
+                })
+            });
     }
 
     /// 当前超频连接数
@@ -172,7 +178,9 @@ impl ActiveRt {
     fn retire(&self) -> bool {
         let target = self.target.load(Ordering::Acquire);
         self.workers
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |w| (w > target).then(|| w - 1))
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |w| {
+                (w > target).then(|| w - 1)
+            })
             .is_ok()
     }
 
@@ -183,7 +191,10 @@ impl ActiveRt {
                 .iter()
                 .map(|s| {
                     let end = s.end.load(Ordering::Acquire) + 1;
-                    s.pos.load(Ordering::Acquire).min(end).saturating_sub(s.start)
+                    s.pos
+                        .load(Ordering::Acquire)
+                        .min(end)
+                        .saturating_sub(s.start)
                 })
                 .sum()
         } else {
@@ -254,7 +265,14 @@ impl Drop for ConnGuard<'_> {
 /// - 重试等待中的连接（`workers - streaming - connecting`）视为掉速缺口
 ///
 /// 有效连接不足常规连接数时补足，总数不超过 常规 + 超频上限
-fn overclock_needed(target: u32, max_extra: u32, workers: u32, streaming: u32, connecting: u32, finishing: u32) -> u32 {
+fn overclock_needed(
+    target: u32,
+    max_extra: u32,
+    workers: u32,
+    streaming: u32,
+    connecting: u32,
+    finishing: u32,
+) -> u32 {
     let effective = streaming.saturating_sub(finishing) + connecting;
     let deficit = target.saturating_sub(effective);
     let room = (target + max_extra).saturating_sub(workers);
@@ -306,7 +324,10 @@ struct Source {
 
 impl Source {
     fn from_task(task: &crate::model::Task) -> Self {
-        Self { url: task.url.clone(), headers: Arc::new(task.headers.clone()) }
+        Self {
+            url: task.url.clone(),
+            headers: Arc::new(task.headers.clone()),
+        }
     }
 
     fn get(&self, client: &reqwest::Client) -> reqwest::RequestBuilder {
@@ -331,7 +352,27 @@ struct ProbeInfo {
     mime: Option<String>,
 }
 
-async fn probe(client: &reqwest::Client, src: &Source, rt: &ActiveRt) -> Result<ProbeInfo, DlError> {
+fn parse_content_range(value: &str) -> Option<(u64, u64, Option<u64>)> {
+    let (unit, range) = value.split_once(' ')?;
+    if !unit.eq_ignore_ascii_case("bytes") {
+        return None;
+    }
+    let (range, total) = range.split_once('/')?;
+    let (start, end) = range.split_once('-')?;
+    let start = start.parse().ok()?;
+    let end = end.parse().ok()?;
+    if end < start {
+        return None;
+    }
+    let total = (total != "*").then(|| total.parse().ok()).flatten();
+    Some((start, end, total))
+}
+
+async fn probe(
+    client: &reqwest::Client,
+    src: &Source,
+    rt: &ActiveRt,
+) -> Result<ProbeInfo, DlError> {
     let t0 = Instant::now();
     let req = src.get(client).header(RANGE, "bytes=0-").send();
     let resp = tokio::select! {
@@ -341,18 +382,28 @@ async fn probe(client: &reqwest::Client, src: &Source, rt: &ActiveRt) -> Result<
     rt.record_latency(t0.elapsed());
     let status = resp.status();
     if !status.is_success() {
-        return Err(DlError::Other(format!("服务器返回 HTTP {}", status.as_u16())));
+        return Err(DlError::Other(format!(
+            "服务器返回 HTTP {}",
+            status.as_u16()
+        )));
     }
     let headers = resp.headers();
-    let header_str = |k| headers.get(k).map(|v: &reqwest::header::HeaderValue| String::from_utf8_lossy(v.as_bytes()).to_string());
+    let header_str = |k| {
+        headers.get(k).map(|v: &reqwest::header::HeaderValue| {
+            String::from_utf8_lossy(v.as_bytes()).to_string()
+        })
+    };
 
     let (total, resumable) = if status == StatusCode::PARTIAL_CONTENT {
         // Content-Range: bytes 0-999/1000
-        let total = header_str(CONTENT_RANGE)
-            .and_then(|v| v.rsplit('/').next().and_then(|t| t.trim().parse::<u64>().ok()));
-        (total, total.is_some())
+        match header_str(CONTENT_RANGE).and_then(|v| parse_content_range(&v)) {
+            Some((0, _, total)) => (total, total.is_some()),
+            _ => (None, false),
+        }
     } else {
-        let accept = header_str(ACCEPT_RANGES).map(|v| v.eq_ignore_ascii_case("bytes")).unwrap_or(false);
+        let accept = header_str(ACCEPT_RANGES)
+            .map(|v| v.eq_ignore_ascii_case("bytes"))
+            .unwrap_or(false);
         let total = resp.content_length();
         (total, accept && total.is_some())
     };
@@ -360,8 +411,14 @@ async fn probe(client: &reqwest::Client, src: &Source, rt: &ActiveRt) -> Result<
     let file_name = header_str(CONTENT_DISPOSITION)
         .and_then(|v| util::filename_from_disposition(&v))
         .or_else(|| util::filename_from_url(resp.url().as_str()));
-    let mime = header_str(CONTENT_TYPE).map(|v| v.split(';').next().unwrap_or("").trim().to_string());
-    Ok(ProbeInfo { total, resumable, file_name, mime })
+    let mime =
+        header_str(CONTENT_TYPE).map(|v| v.split(';').next().unwrap_or("").trim().to_string());
+    Ok(ProbeInfo {
+        total,
+        resumable,
+        file_name,
+        mime,
+    })
 }
 
 fn plan_segments(total: u64, conns: u32) -> Vec<Segment> {
@@ -370,8 +427,16 @@ fn plan_segments(total: u64, conns: u32) -> Vec<Segment> {
     (0..n)
         .map(|i| {
             let start = i * size;
-            let end = if i == n - 1 { total - 1 } else { start + size - 1 };
-            Segment { start, end, pos: start }
+            let end = if i == n - 1 {
+                total - 1
+            } else {
+                start + size - 1
+            };
+            Segment {
+                start,
+                end,
+                pos: start,
+            }
         })
         .collect()
 }
@@ -401,13 +466,38 @@ async fn run_once(mgr: &Arc<Manager>, id: &str, rt: &Arc<ActiveRt>) -> Result<()
     let dir = PathBuf::from(&task.save_dir);
     std::fs::create_dir_all(&dir)?;
 
-    // 没有可续传的进度时重新探测
-    if !(task.resumable && !task.segments.is_empty()) {
+    // 恢复任务也重新探测一次，避免服务器文件或 Range 能力发生变化后继续写旧分段。
+    let mut probed = None;
+    if task.resumable && !task.segments.is_empty() {
         let info = probe(&client, &Source::from_task(&task), rt).await?;
+        if info.resumable && info.total == task.total {
+            probed = Some(info);
+        } else {
+            task.resumable = false;
+            task.segments.clear();
+            task.downloaded = 0;
+            mgr.update_task(id, |t| {
+                t.resumable = false;
+                t.segments.clear();
+                t.downloaded = 0;
+            });
+            probed = Some(info);
+        }
+    }
+
+    // 没有可续传的进度时重新探测
+    if !task.resumable || task.segments.is_empty() {
+        let info = match probed {
+            Some(info) => info,
+            None => probe(&client, &Source::from_task(&task), rt).await?,
+        };
         if !task.name_locked {
-            let raw = info.file_name.clone().unwrap_or_else(|| task.file_name.clone());
+            let raw = info
+                .file_name
+                .clone()
+                .unwrap_or_else(|| task.file_name.clone());
             let clean = util::sanitize(&raw);
-            task.file_name = util::unique_name(&dir, &clean, |n| mgr.name_taken(&task.save_dir, n, id));
+            task.file_name = mgr.reserve_task_name(id, &task.save_dir, &clean);
             task.name_locked = true;
         }
         task.total = info.total;
@@ -444,7 +534,13 @@ async fn run_once(mgr: &Arc<Manager>, id: &str, rt: &Arc<ActiveRt>) -> Result<()
     finalize(mgr, id, &dir, &part, &task.file_name)
 }
 
-fn finalize(mgr: &Arc<Manager>, id: &str, dir: &Path, part: &Path, name: &str) -> Result<(), DlError> {
+fn finalize(
+    mgr: &Arc<Manager>,
+    id: &str,
+    dir: &Path,
+    part: &Path,
+    name: &str,
+) -> Result<(), DlError> {
     let mut final_name = name.to_string();
     if dir.join(&final_name).exists() {
         final_name = util::unique_name(dir, name, |_| false);
@@ -464,15 +560,20 @@ async fn segmented(
 ) -> Result<(), DlError> {
     let total = task.total.unwrap_or(0);
     let existed = part.exists();
-    let file = OpenOptions::new().read(true).write(true).create(true).open(part)?;
-    if file.metadata()?.len() != total {
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(part)?;
+    let size_matches = file.metadata()?.len() == total;
+    if !size_matches {
         file.set_len(total)?;
     }
     let file = Arc::new(file);
 
     // .part 文件丢失时进度作废，从头开始
-    let had_progress = task.segments.iter().any(|s| s.pos > s.start);
-    let segments = if !existed && had_progress {
+    let segments = if !existed || !size_matches {
         plan_segments(total, task.connections)
     } else {
         task.segments.clone()
@@ -578,7 +679,10 @@ async fn worker(
     cancel: CancellationToken,
 ) -> Result<(), DlError> {
     let client = mgr.client();
-    let mut guard = WorkerGuard { rt: rt.clone(), retired: false };
+    let mut guard = WorkerGuard {
+        rt: rt.clone(),
+        retired: false,
+    };
     loop {
         if cancel.is_cancelled() {
             return Err(DlError::Cancelled);
@@ -634,7 +738,10 @@ async fn fetch_segment(
         return Ok(());
     }
     let t0 = Instant::now();
-    let req = src.get(client).header(RANGE, format!("bytes={pos}-{end}")).send();
+    let req = src
+        .get(client)
+        .header(RANGE, format!("bytes={pos}-{end}"))
+        .send();
     let resp = tokio::select! {
         r = req => r?,
         _ = cancel.cancelled() => return Err(DlError::Cancelled),
@@ -646,7 +753,22 @@ async fn fetch_segment(
             return Err(DlError::NoRange);
         }
     } else if status != StatusCode::PARTIAL_CONTENT {
-        return Err(DlError::Other(format!("服务器返回 HTTP {}", status.as_u16())));
+        return Err(DlError::Other(format!(
+            "服务器返回 HTTP {}",
+            status.as_u16()
+        )));
+    } else {
+        let range = resp
+            .headers()
+            .get(CONTENT_RANGE)
+            .and_then(|v| v.to_str().ok())
+            .and_then(parse_content_range)
+            .ok_or_else(|| DlError::Other("服务器返回无效的 Content-Range".into()))?;
+        if range.0 != pos || range.1 > end {
+            return Err(DlError::Other(
+                "服务器返回的 Content-Range 与请求不匹配".into(),
+            ));
+        }
     }
 
     let _streaming = StreamGuard::new(rt, seg);
@@ -673,7 +795,14 @@ async fn fetch_segment(
         if dt >= Duration::from_millis(300) {
             let inst = pos.saturating_sub(sample_pos) * 1000 / dt.as_millis().max(1) as u64;
             let old = seg.rate.load(Ordering::Acquire);
-            seg.rate.store(if old == 0 { inst } else { (old * 6 + inst * 4) / 10 }, Ordering::Release);
+            seg.rate.store(
+                if old == 0 {
+                    inst
+                } else {
+                    (old * 6 + inst * 4) / 10
+                },
+                Ordering::Release,
+            );
             sample_t = Instant::now();
             sample_pos = pos;
         }
@@ -713,7 +842,10 @@ async fn single(
         _ = rt.cancel.cancelled() => return Err(DlError::Cancelled),
     };
     if !resp.status().is_success() {
-        return Err(DlError::Other(format!("服务器返回 HTTP {}", resp.status().as_u16())));
+        return Err(DlError::Other(format!(
+            "服务器返回 HTTP {}",
+            resp.status().as_u16()
+        )));
     }
     let mut writer = std::io::BufWriter::with_capacity(512 * 1024, File::create(part)?);
     let mut stream = resp.bytes_stream();
@@ -755,9 +887,26 @@ mod tests {
 
     fn rt_with(segs: &[(u64, u64, u64, bool)]) -> ActiveRt {
         let rt = ActiveRt::new();
-        *rt.segs.lock() = segs.iter().map(|&(s, e, p, a)| Arc::new(SegRt::new(s, e, p, a))).collect();
+        *rt.segs.lock() = segs
+            .iter()
+            .map(|&(s, e, p, a)| Arc::new(SegRt::new(s, e, p, a)))
+            .collect();
         rt.segmented.store(true, Ordering::Release);
         rt
+    }
+
+    #[test]
+    fn parses_content_range() {
+        assert_eq!(
+            parse_content_range("bytes 0-99/1000"),
+            Some((0, 99, Some(1000)))
+        );
+        assert_eq!(
+            parse_content_range("bytes 100-199/*"),
+            Some((100, 199, None))
+        );
+        assert_eq!(parse_content_range("items 0-99/1000"), None);
+        assert_eq!(parse_content_range("bytes 99-0/1000"), None);
     }
 
     #[test]
@@ -771,7 +920,10 @@ mod tests {
     fn splits_largest_remaining() {
         let mb = 1024 * 1024;
         // 模拟截图场景：其余分段已完成，只剩一段还差 1MB 的慢连接
-        let rt = rt_with(&[(0, 3 * mb - 1, 3 * mb, true), (3 * mb, 6 * mb - 1, 5 * mb, true)]);
+        let rt = rt_with(&[
+            (0, 3 * mb - 1, 3 * mb, true),
+            (3 * mb, 6 * mb - 1, 5 * mb, true),
+        ]);
         let new = rt.take_segment().expect("剩余 1MB 应该被拆分");
         let segs = rt.segs.lock();
         assert_eq!(segs.len(), 3);

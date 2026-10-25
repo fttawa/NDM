@@ -35,6 +35,7 @@ interface State {
   toast: string | null;
 
   init: () => Promise<void>;
+  reload: () => Promise<void>;
   setFilter: (f: Filter) => void;
   setView: (v: View) => void;
   openAdd: (prefill?: string | AddPrefill) => void;
@@ -61,6 +62,7 @@ function mergeProgress(tasks: Task[], progress: Progress[]): Task[] {
 }
 
 let toastTimer: number | undefined;
+let initPromise: Promise<void> | null = null;
 
 export const useStore = create<State>((set, get) => ({
   tasks: [],
@@ -76,37 +78,49 @@ export const useStore = create<State>((set, get) => ({
   confirmIds: null,
   toast: null,
 
-  async init() {
-    const [tasks, settings] = await Promise.all([api.getTasks(), api.getSettings()]);
-    set({ tasks, settings });
-    await api.onTasks((tasks) => {
-      // 保留运行时进度，避免列表刷新时进度条回跳
-      const prev = new Map(get().tasks.map((t) => [t.id, t]));
-      // 已删除的任务从选中中移除
-      const ids = new Set(tasks.map((t) => t.id));
-      const checked = get().checked.filter((id) => ids.has(id));
-      if (checked.length !== get().checked.length) set({ checked });
-      set({
-        tasks: tasks.map((t) => {
-          const old = prev.get(t.id);
-          return old && t.status === "active" && old.downloaded > t.downloaded
-            ? { ...t, downloaded: old.downloaded, segments: old.segments, speed: old.speed }
-            : t;
-        }),
+  init() {
+    if (initPromise) return initPromise;
+    initPromise = (async () => {
+      const [tasks, settings] = await Promise.all([api.getTasks(), api.getSettings()]);
+      set({ tasks, settings });
+      await api.onTasks((tasks) => {
+        // 保留运行时进度，避免列表刷新时进度条回跳
+        const prev = new Map(get().tasks.map((t) => [t.id, t]));
+        // 已删除的任务从选中中移除
+        const ids = new Set(tasks.map((t) => t.id));
+        const checked = get().checked.filter((id) => ids.has(id));
+        if (checked.length !== get().checked.length) set({ checked });
+        set({
+          tasks: tasks.map((t) => {
+            const old = prev.get(t.id);
+            return old && t.status === "active" && old.downloaded > t.downloaded
+              ? { ...t, downloaded: old.downloaded, segments: old.segments, speed: old.speed }
+              : t;
+          }),
+        });
       });
+      await api.onProgress((progress) => {
+        set((s) => ({ tasks: mergeProgress(s.tasks, progress) }));
+      });
+      // 固定节奏采样总速度，曲线才能匀速滚动；
+      // 采样值做指数平滑（只依赖历史值，已画出的曲线形状不会再变）
+      setInterval(() => {
+        const s = get();
+        const total = s.tasks.reduce((a, t) => a + (t.status === "active" ? t.speed : 0), 0);
+        const prev = s.speedHistory[s.speedHistory.length - 1].v;
+        const v = prev + (total - prev) * 0.35;
+        set({ speedHistory: [...s.speedHistory.slice(1), { t: performance.now(), v: v < 1 ? 0 : v }] });
+      }, SAMPLE_MS);
+    })().catch((error) => {
+      initPromise = null;
+      throw error;
     });
-    await api.onProgress((progress) => {
-      set((s) => ({ tasks: mergeProgress(s.tasks, progress) }));
-    });
-    // 固定节奏采样总速度，曲线才能匀速滚动；
-    // 采样值做指数平滑（只依赖历史值，已画出的曲线形状不会再变）
-    setInterval(() => {
-      const s = get();
-      const total = s.tasks.reduce((a, t) => a + (t.status === "active" ? t.speed : 0), 0);
-      const prev = s.speedHistory[s.speedHistory.length - 1].v;
-      const v = prev + (total - prev) * 0.35;
-      set({ speedHistory: [...s.speedHistory.slice(1), { t: performance.now(), v: v < 1 ? 0 : v }] });
-    }, SAMPLE_MS);
+    return initPromise;
+  },
+
+  async reload() {
+    const [tasks, settings] = await Promise.all([api.getTasks(), api.getSettings()]);
+    set({ tasks, settings, checked: [], selectedId: null });
   },
 
   setFilter: (filter) => set({ filter }),

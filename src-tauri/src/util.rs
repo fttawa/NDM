@@ -36,7 +36,7 @@ fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
 
 pub fn filename_from_url(url: &str) -> Option<String> {
     let parsed = reqwest::Url::parse(url).ok()?;
-    let last = parsed.path_segments()?.filter(|s| !s.is_empty()).last()?;
+    let last = parsed.path_segments()?.rfind(|s| !s.is_empty())?;
     let name = percent_decode_str(last).decode_utf8_lossy().to_string();
     if name.is_empty() {
         None
@@ -68,9 +68,8 @@ pub fn sanitize(name: &str) -> String {
 
 /// 如果文件已存在（或被其他任务占用），生成 `name (1).ext` 形式的新名字
 pub fn unique_name(dir: &Path, name: &str, taken: impl Fn(&str) -> bool) -> String {
-    let exists = |n: &str| {
-        taken(n) || dir.join(n).exists() || dir.join(format!("{n}.part")).exists()
-    };
+    let exists =
+        |n: &str| taken(n) || dir.join(n).exists() || dir.join(format!("{n}.part")).exists();
     if !exists(name) {
         return name.to_string();
     }
@@ -96,7 +95,10 @@ pub fn write_at(file: &std::fs::File, buf: &[u8], offset: u64) -> std::io::Resul
         while written < buf.len() {
             let n = file.seek_write(&buf[written..], offset + written as u64)?;
             if n == 0 {
-                return Err(std::io::Error::new(std::io::ErrorKind::WriteZero, "写入失败"));
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::WriteZero,
+                    "写入失败",
+                ));
             }
             written += n;
         }
@@ -132,8 +134,10 @@ mod tests {
             Some("a b.zip")
         );
         assert_eq!(
-            filename_from_disposition("attachment; filename=x.zip; filename*=UTF-8''%E4%B8%AD%E6%96%87.zip")
-                .as_deref(),
+            filename_from_disposition(
+                "attachment; filename=x.zip; filename*=UTF-8''%E4%B8%AD%E6%96%87.zip"
+            )
+            .as_deref(),
             Some("中文.zip")
         );
     }

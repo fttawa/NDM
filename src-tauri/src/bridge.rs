@@ -1,7 +1,7 @@
 //! 浏览器扩展桥接：本地 HTTP 服务（127.0.0.1:16800），接收扩展转交的下载
 //!
-//! 安全：只接受来自浏览器扩展（Origin 为扩展协议）或本机程序（无 Origin）的请求，
-//! 普通网页带有自身 Origin，无法向 NDM 添加任务。
+//! 安全：只接受来自浏览器扩展（Origin 为扩展协议）的请求，
+//! 写入接口还需要启动期随机 token，普通网页无法向 NDM 添加任务。
 
 use crate::manager::{AddOptions, Manager};
 use parking_lot::Mutex;
@@ -10,20 +10,23 @@ use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use tauri::Manager as _;
 use tiny_http::{Header, Method, Request, Response, Server};
 
 pub const PORT: u16 = 16800;
 
 /// 监听端口；NDM_BRIDGE_PORT 可覆盖（开发测试实例使用，避免与正在运行的 NDM 冲突）
 fn port() -> u16 {
-    std::env::var("NDM_BRIDGE_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(PORT)
+    std::env::var("NDM_BRIDGE_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(PORT)
 }
 const MAX_BODY: u64 = 1024 * 1024;
 
 /// 端口被占用时的重试间隔（如升级安装时旧进程尚未退出）
 const RETRY_INTERVAL: Duration = Duration::from_secs(2);
 
-#[derive(Default)]
 pub struct Bridge {
     server: Mutex<Option<Arc<Server>>>,
     error: Mutex<Option<String>>,
@@ -31,6 +34,19 @@ pub struct Bridge {
     wanted: AtomicBool,
     /// 是否有监听/重试线程在运行，避免重复启动
     running: AtomicBool,
+    token: String,
+}
+
+impl Default for Bridge {
+    fn default() -> Self {
+        Self {
+            server: Mutex::new(None),
+            error: Mutex::new(None),
+            wanted: AtomicBool::new(false),
+            running: AtomicBool::new(false),
+            token: uuid::Uuid::new_v4().to_string(),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -128,7 +144,8 @@ impl Bridge {
                             }
                         }
                         Err(e) => {
-                            *me.error.lock() = Some(format!("端口 {} 被占用，正在重试…（{e}）", port()));
+                            *me.error.lock() =
+                                Some(format!("端口 {} 被占用，正在重试…（{e}）", port()));
                             std::thread::sleep(RETRY_INTERVAL);
                         }
                     }
@@ -158,9 +175,14 @@ impl Bridge {
 fn is_allowed_origin(origin: Option<&str>) -> bool {
     match origin {
         None => true,
-        Some(o) => ["chrome-extension://", "moz-extension://", "extension://", "safari-web-extension://"]
-            .iter()
-            .any(|p| o.starts_with(p)),
+        Some(o) => [
+            "chrome-extension://",
+            "moz-extension://",
+            "extension://",
+            "safari-web-extension://",
+        ]
+        .iter()
+        .any(|p| o.starts_with(p)),
     }
 }
 
@@ -197,7 +219,10 @@ fn handle(mgr: &Arc<Manager>, mut req: Request) {
         (Method::Options, _) => {
             let mut resp = Response::empty(204)
                 .with_header(header("Access-Control-Allow-Methods", "GET, POST, OPTIONS"))
-                .with_header(header("Access-Control-Allow-Headers", "Content-Type"))
+                .with_header(header(
+                    "Access-Control-Allow-Headers",
+                    "Content-Type, X-NDM-Token",
+                ))
                 .with_header(header("Access-Control-Allow-Private-Network", "true"))
                 .with_header(header("Access-Control-Max-Age", "600"));
             if let Some(o) = origin {
@@ -210,38 +235,92 @@ fn handle(mgr: &Arc<Manager>, mut req: Request) {
             respond(
                 req,
                 200,
-                serde_json::json!({ "name": "NDM", "version": env!("CARGO_PKG_VERSION"), "confirm": s.capture_confirm }),
+                serde_json::json!({ "name": "NDM", "version": env!("CARGO_PKG_VERSION"), "confirm": s.capture_confirm, "token": mgr.app.state::<Arc<crate::bridge::Bridge>>().token }),
                 origin,
             );
         }
         (Method::Post, "/batch") => {
+            if !authorized(&req, mgr) {
+                return respond(req, 401, serde_json::json!({ "error": "未授权" }), origin);
+            }
             let mut body = String::new();
-            if req.as_reader().take(MAX_BODY * 16).read_to_string(&mut body).is_err() {
-                return respond(req, 400, serde_json::json!({ "error": "请求体无效" }), origin);
+            if req
+                .as_reader()
+                .take(MAX_BODY * 16)
+                .read_to_string(&mut body)
+                .is_err()
+            {
+                return respond(
+                    req,
+                    400,
+                    serde_json::json!({ "error": "请求体无效" }),
+                    origin,
+                );
             }
             match serde_json::from_str::<Batch>(&body) {
                 Ok(batch) => match accept_batch(mgr, batch) {
-                    Ok(n) => respond(req, 200, serde_json::json!({ "ok": true, "count": n }), origin),
+                    Ok(n) => respond(
+                        req,
+                        200,
+                        serde_json::json!({ "ok": true, "count": n }),
+                        origin,
+                    ),
                     Err(e) => respond(req, 400, serde_json::json!({ "error": e }), origin),
                 },
-                Err(e) => respond(req, 400, serde_json::json!({ "error": format!("JSON 无效：{e}") }), origin),
+                Err(e) => respond(
+                    req,
+                    400,
+                    serde_json::json!({ "error": format!("JSON 无效：{e}") }),
+                    origin,
+                ),
             }
         }
         (Method::Post, "/add") => {
+            if !authorized(&req, mgr) {
+                return respond(req, 401, serde_json::json!({ "error": "未授权" }), origin);
+            }
             let mut body = String::new();
-            if req.as_reader().take(MAX_BODY).read_to_string(&mut body).is_err() {
-                return respond(req, 400, serde_json::json!({ "error": "请求体无效" }), origin);
+            if req
+                .as_reader()
+                .take(MAX_BODY)
+                .read_to_string(&mut body)
+                .is_err()
+            {
+                return respond(
+                    req,
+                    400,
+                    serde_json::json!({ "error": "请求体无效" }),
+                    origin,
+                );
             }
             match serde_json::from_str::<Capture>(&body) {
                 Ok(cap) => match accept(mgr, cap) {
                     Ok(()) => respond(req, 200, serde_json::json!({ "ok": true }), origin),
                     Err(e) => respond(req, 400, serde_json::json!({ "error": e }), origin),
                 },
-                Err(e) => respond(req, 400, serde_json::json!({ "error": format!("JSON 无效：{e}") }), origin),
+                Err(e) => respond(
+                    req,
+                    400,
+                    serde_json::json!({ "error": format!("JSON 无效：{e}") }),
+                    origin,
+                ),
             }
         }
-        _ => respond(req, 404, serde_json::json!({ "error": "not found" }), origin),
+        _ => respond(
+            req,
+            404,
+            serde_json::json!({ "error": "not found" }),
+            origin,
+        ),
     }
+}
+
+fn authorized(req: &Request, mgr: &Arc<Manager>) -> bool {
+    req.headers()
+        .iter()
+        .find(|h| h.field.equiv("X-NDM-Token"))
+        .map(|h| h.value.as_str() == mgr.app.state::<Arc<Bridge>>().token)
+        .unwrap_or(false)
 }
 
 fn accept(mgr: &Arc<Manager>, cap: Capture) -> Result<(), String> {
@@ -276,7 +355,14 @@ fn accept(mgr: &Arc<Manager>, cap: Capture) -> Result<(), String> {
     } else {
         mgr.add_tasks(
             vec![parsed.to_string()],
-            AddOptions { save_dir: None, file_name, file_names: None, connections: None, start: true, headers },
+            AddOptions {
+                save_dir: None,
+                file_name,
+                file_names: None,
+                connections: None,
+                start: true,
+                headers,
+            },
         )?;
     }
     Ok(())
@@ -298,13 +384,19 @@ fn accept_batch(mgr: &Arc<Manager>, batch: Batch) -> Result<usize, String> {
         return Err("没有可下载的文件".into());
     }
     let referrer = batch.referrer.filter(|r| is_http(r));
-    let headers = referrer.iter().map(|r| ("Referer".to_string(), r.clone())).collect();
+    let headers = referrer
+        .iter()
+        .map(|r| ("Referer".to_string(), r.clone()))
+        .collect();
     let n = items.len();
     crate::capture::open_batch(
         &mgr.app,
         BatchPayload {
             source: batch.source.unwrap_or_default(),
-            title: batch.title.filter(|t| !t.trim().is_empty()).unwrap_or_else(|| "批量下载".into()),
+            title: batch
+                .title
+                .filter(|t| !t.trim().is_empty())
+                .unwrap_or_else(|| "批量下载".into()),
             referrer,
             headers,
             items,

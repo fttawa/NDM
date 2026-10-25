@@ -1,6 +1,6 @@
 [package]
 name = "ndm"
-version = "0.2.1"
+version = "0.2.2"
 description = "NDM - 多线程下载管理器"
 edition = "2021"
 
@@ -29,6 +29,7 @@ percent-encoding = "2"
 parking_lot = "0.12"
 fs2 = "0.4"
 tiny_http = "0.12"
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [profile.release]
 codegen-units = 1

@@ -3,6 +3,7 @@
 use crate::engine::{self, ActiveRt, DlError};
 use crate::limiter::Limiter;
 use crate::model::{now_ms, Progress, Settings, Status, Task};
+use crate::storage::Storage;
 use crate::util;
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
@@ -19,10 +20,11 @@ pub struct Manager {
     pub app: AppHandle,
     tasks: Mutex<Vec<Task>>,
     active: Mutex<HashMap<String, Arc<ActiveRt>>>,
+    persist_lock: Mutex<()>,
     settings: RwLock<Settings>,
     client: RwLock<reqwest::Client>,
     pub limiter: Limiter,
-    data_dir: PathBuf,
+    storage: Storage,
 }
 
 pub struct AddOptions {
@@ -46,7 +48,11 @@ pub fn build_client(s: &Settings) -> Result<reqwest::Client, String> {
                 return Err("请填写代理地址".into());
             }
             // 未写协议时默认按 HTTP 代理处理
-            let url = if url.contains("://") { url.to_string() } else { format!("http://{url}") };
+            let url = if url.contains("://") {
+                url.to_string()
+            } else {
+                format!("http://{url}")
+            };
             let proxy = reqwest::Proxy::all(&url).map_err(|e| format!("代理地址无效：{e}"))?;
             builder = builder.proxy(proxy);
         }
@@ -69,15 +75,6 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> {
     serde_json::from_slice(&data).ok()
 }
 
-fn write_json<T: serde::Serialize>(path: &Path, value: &T) {
-    let tmp = path.with_extension("json.tmp");
-    if let Ok(data) = serde_json::to_vec_pretty(value) {
-        if std::fs::write(&tmp, data).is_ok() {
-            let _ = std::fs::rename(&tmp, path);
-        }
-    }
-}
-
 impl Manager {
     pub fn new(app: AppHandle) -> Result<Arc<Self>, Box<dyn std::error::Error>> {
         // NDM_DATA_DIR：使用独立的数据目录（开发测试用，不影响正在使用的实例）
@@ -87,7 +84,15 @@ impl Manager {
         };
         std::fs::create_dir_all(&data_dir)?;
 
-        let mut settings: Settings = read_json(&data_dir.join("settings.json")).unwrap_or_default();
+        let storage = Storage::open(data_dir.join("state.db"))?;
+        let mut settings: Settings = match storage.load_settings()? {
+            Some(settings) => settings,
+            None => {
+                let settings = read_json(&data_dir.join("settings.json")).unwrap_or_default();
+                storage.save_settings(&settings)?;
+                settings
+            }
+        };
         if settings.download_dir.is_empty() {
             settings.download_dir = app
                 .path()
@@ -99,19 +104,37 @@ impl Manager {
         settings.max_concurrent = settings.max_concurrent.clamp(1, 16);
         settings.connections = settings.connections.clamp(1, 32);
 
-        let mut tasks: Vec<Task> = read_json(&data_dir.join("tasks.json")).unwrap_or_default();
+        let mut tasks: Vec<Task> = match storage.load_tasks()? {
+            Some(tasks) => tasks,
+            None => {
+                let tasks =
+                    read_json::<Vec<Task>>(&data_dir.join("tasks.json")).unwrap_or_default();
+                storage.save_tasks(&tasks)?;
+                tasks
+            }
+        };
         for t in tasks.iter_mut() {
             t.speed = 0;
             t.active_conns = 0;
             t.boost = 0;
             if matches!(t.status, Status::Active | Status::Waiting) {
-                t.status = if settings.resume_on_start { Status::Waiting } else { Status::Paused };
+                t.status = if settings.resume_on_start {
+                    Status::Waiting
+                } else {
+                    Status::Paused
+                };
             }
         }
+        storage.save_settings(&settings)?;
+        storage.save_tasks(&tasks)?;
 
         let client = build_client(&settings).unwrap_or_else(|e| {
             eprintln!("{e}，回退为跟随系统代理");
-            build_client(&Settings { proxy_mode: "system".into(), ..settings.clone() }).unwrap_or_default()
+            build_client(&Settings {
+                proxy_mode: "system".into(),
+                ..settings.clone()
+            })
+            .unwrap_or_default()
         });
 
         Ok(Arc::new(Self {
@@ -120,8 +143,9 @@ impl Manager {
             settings: RwLock::new(settings),
             tasks: Mutex::new(tasks),
             active: Mutex::new(HashMap::new()),
+            persist_lock: Mutex::new(()),
             app,
-            data_dir,
+            storage,
         }))
     }
 
@@ -133,6 +157,33 @@ impl Manager {
 
     pub fn settings(&self) -> Settings {
         self.settings.read().clone()
+    }
+
+    pub fn export_data(&self, path: &Path) -> Result<(), String> {
+        self.storage
+            .export_bundle(path)
+            .map_err(|e| format!("导出失败：{e}"))
+    }
+
+    pub fn import_data(self: &Arc<Self>, path: &Path) -> Result<(), String> {
+        if !self.active.lock().is_empty() {
+            return Err("请先暂停所有下载，再导入数据".into());
+        }
+        let bundle = Storage::read_bundle(path).map_err(|e| format!("导入失败：{e}"))?;
+        let _ = build_client(&bundle.settings)?;
+        {
+            let mut tasks = self.tasks.lock();
+            *tasks = bundle.tasks;
+            for task in tasks.iter_mut() {
+                task.speed = 0;
+                task.active_conns = 0;
+                task.boost = 0;
+            }
+        }
+        self.set_settings(bundle.settings)?;
+        self.persist();
+        self.emit_tasks();
+        Ok(())
     }
 
     pub fn client(&self) -> reqwest::Client {
@@ -153,12 +204,21 @@ impl Manager {
         }
     }
 
-    /// 同目录下是否已有其他任务使用该文件名
-    pub fn name_taken(&self, dir: &str, name: &str, except: &str) -> bool {
-        self.tasks
-            .lock()
-            .iter()
-            .any(|t| t.id != except && t.save_dir == dir && t.name_locked && t.file_name == name)
+    /// Reserve a task's filename while holding the task list lock. This keeps
+    /// concurrent additions from selecting the same name.
+    pub fn reserve_task_name(&self, id: &str, dir: &str, candidate: &str) -> String {
+        let mut tasks = self.tasks.lock();
+        let dir_path = Path::new(dir);
+        let name = util::unique_name(dir_path, candidate, |name| {
+            tasks
+                .iter()
+                .any(|t| t.id != id && t.save_dir == dir && t.name_locked && t.file_name == name)
+        });
+        if let Some(task) = tasks.iter_mut().find(|t| t.id == id) {
+            task.file_name = name.clone();
+            task.name_locked = true;
+        }
+        name
     }
 
     pub fn emit_tasks(&self) {
@@ -167,8 +227,12 @@ impl Manager {
 
     /// 把运行中任务的分段进度同步回任务列表并写盘
     pub fn persist(&self) {
-        let actives: Vec<(String, Arc<ActiveRt>)> =
-            self.active.lock().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let actives: Vec<(String, Arc<ActiveRt>)> = self
+            .active
+            .lock()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
         let tasks = {
             let mut tasks = self.tasks.lock();
             for (id, rt) in &actives {
@@ -181,11 +245,17 @@ impl Manager {
             }
             tasks.clone()
         };
-        write_json(&self.data_dir.join("tasks.json"), &tasks);
+        let _persist = self.persist_lock.lock();
+        if let Err(e) = self.storage.save_tasks(&tasks) {
+            eprintln!("保存任务失败：{e}");
+        }
     }
 
     fn save_settings(&self) {
-        write_json(&self.data_dir.join("settings.json"), &*self.settings.read());
+        let _persist = self.persist_lock.lock();
+        if let Err(e) = self.storage.save_settings(&self.settings.read()) {
+            eprintln!("保存设置失败：{e}");
+        }
     }
 
     pub fn set_settings(self: &Arc<Self>, mut s: Settings) -> Result<Settings, String> {
@@ -194,7 +264,9 @@ impl Manager {
         s.proxy_url = s.proxy_url.trim().to_string();
         let net_changed = {
             let cur = self.settings.read();
-            s.user_agent != cur.user_agent || s.proxy_mode != cur.proxy_mode || s.proxy_url != cur.proxy_url
+            s.user_agent != cur.user_agent
+                || s.proxy_mode != cur.proxy_mode
+                || s.proxy_url != cur.proxy_url
         };
         if net_changed {
             // 先构建成功再替换，地址无效时保持原设置不变
@@ -213,8 +285,8 @@ impl Manager {
         let max = self.settings.read().max_concurrent as usize;
         let mut started = Vec::new();
         {
-            let mut tasks = self.tasks.lock();
             let mut active = self.active.lock();
+            let mut tasks = self.tasks.lock();
             for t in tasks.iter_mut() {
                 if active.len() >= max {
                     break;
@@ -239,8 +311,8 @@ impl Manager {
         let res = engine::run(self.clone(), id.clone(), rt.clone()).await;
         let mut done_name = None;
         {
-            let mut tasks = self.tasks.lock();
             self.active.lock().remove(&id);
+            let mut tasks = self.tasks.lock();
             if let Some(t) = tasks.iter_mut().find(|t| t.id == id) {
                 if rt.segmented.load(std::sync::atomic::Ordering::Acquire) {
                     t.segments = rt.segments();
@@ -288,14 +360,19 @@ impl Manager {
 
     async fn ticker(self: Arc<Self>) {
         // 每个任务最近几秒的 (时刻, 已下载) 采样，用滑动窗口计算速度
-        let mut samples: HashMap<String, std::collections::VecDeque<(Instant, u64)>> = HashMap::new();
+        let mut samples: HashMap<String, std::collections::VecDeque<(Instant, u64)>> =
+            HashMap::new();
         let mut tick = 0u64;
         let mut was_active = false;
         loop {
             tokio::time::sleep(Duration::from_millis(500)).await;
             tick += 1;
-            let actives: Vec<(String, Arc<ActiveRt>)> =
-                self.active.lock().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+            let actives: Vec<(String, Arc<ActiveRt>)> = self
+                .active
+                .lock()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
             if actives.is_empty() {
                 samples.clear();
                 if was_active {
@@ -318,7 +395,11 @@ impl Manager {
                     }
                     let (t0, b0) = win[0];
                     let dt = now.duration_since(t0).as_secs_f64();
-                    let speed = if dt > 0.05 { downloaded.saturating_sub(b0) as f64 / dt } else { 0.0 };
+                    let speed = if dt > 0.05 {
+                        downloaded.saturating_sub(b0) as f64 / dt
+                    } else {
+                        0.0
+                    };
                     let conns = rt.conns.load(std::sync::atomic::Ordering::Acquire);
                     let boost = rt.boost();
                     let latency_ms = rt.latency_ms.load(std::sync::atomic::Ordering::Acquire);
@@ -343,16 +424,24 @@ impl Manager {
             }
             samples.retain(|k, _| actives.iter().any(|(id, _)| id == k));
             let _ = self.app.emit("ndm://progress", progress);
-            if tick % 10 == 0 {
+            if tick.is_multiple_of(10) {
                 self.persist();
             }
         }
     }
 
-    pub fn add_tasks(self: &Arc<Self>, urls: Vec<String>, opts: AddOptions) -> Result<Vec<Task>, String> {
+    pub fn add_tasks(
+        self: &Arc<Self>,
+        urls: Vec<String>,
+        opts: AddOptions,
+    ) -> Result<Vec<Task>, String> {
         let settings = self.settings();
         // 先与文件名配对再过滤无效链接，避免名字错位
-        let single_name = if urls.len() == 1 { opts.file_name.clone() } else { None };
+        let single_name = if urls.len() == 1 {
+            opts.file_name.clone()
+        } else {
+            None
+        };
         let names: Vec<Option<String>> = match opts.file_names {
             Some(v) if v.len() == urls.len() => v.into_iter().map(Some).collect(),
             _ => vec![single_name; urls.len()],
@@ -360,7 +449,13 @@ impl Manager {
         let pairs: Vec<(String, Option<String>)> = urls
             .into_iter()
             .zip(names)
-            .map(|(u, n)| (u.trim().to_string(), n.filter(|n| !n.trim().is_empty()).map(|n| util::sanitize(&n))))
+            .map(|(u, n)| {
+                (
+                    u.trim().to_string(),
+                    n.filter(|n| !n.trim().is_empty())
+                        .map(|n| util::sanitize(&n)),
+                )
+            })
             .filter(|(u, _)| {
                 reqwest::Url::parse(u)
                     .map(|p| matches!(p.scheme(), "http" | "https"))
@@ -374,21 +469,30 @@ impl Manager {
             .save_dir
             .filter(|d| !d.trim().is_empty())
             .unwrap_or(settings.download_dir.clone());
-        let conns = opts.connections.unwrap_or(settings.connections).clamp(1, 32);
+        let conns = opts
+            .connections
+            .unwrap_or(settings.connections)
+            .clamp(1, 32);
         let mut created = Vec::new();
         // 本批次已占用的文件名（同批同名文件也要去重）
         let mut batch_names = std::collections::HashSet::new();
+        let mut tasks = self.tasks.lock();
         for (url, custom) in pairs {
             let (file_name, locked) = match custom {
                 Some(n) => (n, true),
                 None => (
-                    util::filename_from_url(&url).map(|n| util::sanitize(&n)).unwrap_or_else(|| "download".into()),
+                    util::filename_from_url(&url)
+                        .map(|n| util::sanitize(&n))
+                        .unwrap_or_else(|| "download".into()),
                     false,
                 ),
             };
             let file_name = if locked {
                 let unique = util::unique_name(Path::new(&save_dir), &file_name, |n| {
-                    batch_names.contains(n) || self.name_taken(&save_dir, n, "")
+                    batch_names.contains(n)
+                        || tasks
+                            .iter()
+                            .any(|t| t.save_dir == save_dir && t.name_locked && t.file_name == n)
                 });
                 batch_names.insert(unique.clone());
                 unique
@@ -403,7 +507,11 @@ impl Manager {
                 save_dir: save_dir.clone(),
                 total: None,
                 downloaded: 0,
-                status: if opts.start { Status::Waiting } else { Status::Paused },
+                status: if opts.start {
+                    Status::Waiting
+                } else {
+                    Status::Paused
+                },
                 resumable: false,
                 force_single: false,
                 segments: Vec::new(),
@@ -419,13 +527,11 @@ impl Manager {
                 latency_ms: 0,
             });
         }
-        {
-            let mut tasks = self.tasks.lock();
-            // 新任务放在最前面
-            for t in created.iter().rev() {
-                tasks.insert(0, t.clone());
-            }
+        // 新任务放在最前面；文件名检查与插入在同一把锁内完成。
+        for t in created.iter().rev() {
+            tasks.insert(0, t.clone());
         }
+        drop(tasks);
         self.persist();
         self.schedule();
         Ok(created)
@@ -434,16 +540,21 @@ impl Manager {
     pub fn pause(self: &Arc<Self>, ids: &[String]) {
         {
             let mut tasks = self.tasks.lock();
-            let active = self.active.lock();
             for t in tasks.iter_mut().filter(|t| ids.contains(&t.id)) {
                 if matches!(t.status, Status::Active | Status::Waiting) {
                     t.status = Status::Paused;
                     t.speed = 0;
-                    if let Some(rt) = active.get(&t.id) {
-                        rt.cancel.cancel();
-                    }
                 }
             }
+        }
+        let to_cancel: Vec<_> = {
+            let active = self.active.lock();
+            ids.iter()
+                .filter_map(|id| active.get(id).cloned())
+                .collect()
+        };
+        for rt in to_cancel {
+            rt.cancel.cancel();
         }
         self.persist();
         self.schedule();
@@ -475,7 +586,8 @@ impl Manager {
     pub fn remove(self: &Arc<Self>, ids: &[String], delete_file: bool) {
         let removed: Vec<Task> = {
             let mut tasks = self.tasks.lock();
-            let (gone, keep): (Vec<Task>, Vec<Task>) = tasks.drain(..).partition(|t| ids.contains(&t.id));
+            let (gone, keep): (Vec<Task>, Vec<Task>) =
+                tasks.drain(..).partition(|t| ids.contains(&t.id));
             *tasks = keep;
             gone
         };
@@ -561,7 +673,11 @@ mod tests {
     use super::*;
 
     fn with_proxy(mode: &str, url: &str) -> Settings {
-        Settings { proxy_mode: mode.into(), proxy_url: url.into(), ..Settings::default() }
+        Settings {
+            proxy_mode: mode.into(),
+            proxy_url: url.into(),
+            ..Settings::default()
+        }
     }
 
     #[test]
@@ -580,7 +696,12 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn proxy_live() {
-        for s in [with_proxy("none", ""), with_proxy("custom", "http://127.0.0.1:7897"), with_proxy("custom", "socks5://127.0.0.1:7897"), with_proxy("custom", "http://127.0.0.1:1")] {
+        for s in [
+            with_proxy("none", ""),
+            with_proxy("custom", "http://127.0.0.1:7897"),
+            with_proxy("custom", "socks5://127.0.0.1:7897"),
+            with_proxy("custom", "http://127.0.0.1:1"),
+        ] {
             let r = crate::commands::test_proxy(s.clone()).await;
             println!("{:>8} {:<26} => {:?}", s.proxy_mode, s.proxy_url, r);
         }

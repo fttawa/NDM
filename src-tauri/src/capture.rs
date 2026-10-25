@@ -9,7 +9,10 @@ use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, LogicalSize, Manager as _, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, LogicalSize, Manager as _, PhysicalPosition, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder, Window,
+};
 
 pub const LABEL_PREFIX: &str = "capture-";
 const WIDTH: f64 = 460.0;
@@ -37,21 +40,69 @@ fn new_id() -> String {
 /// 单个下载的确认卡片
 pub fn open(app: &AppHandle, payload: CapturePayload) -> Result<(), String> {
     let id = new_id();
-    app.state::<Captures>().single.lock().insert(id.clone(), payload);
-    open_window(app, &id, &format!("capture/{id}"), "NDM - 新的下载", WIDTH, HEIGHT)
+    app.state::<Captures>()
+        .single
+        .lock()
+        .insert(id.clone(), payload);
+    if let Err(e) = open_window(
+        app,
+        &id,
+        &format!("capture/{id}"),
+        "NDM - 新的下载",
+        WIDTH,
+        HEIGHT,
+    ) {
+        app.state::<Captures>().single.lock().remove(&id);
+        return Err(e);
+    }
+    Ok(())
 }
 
 /// 批量下载卡片（如 OpenList 当前文件夹）
 pub fn open_batch(app: &AppHandle, payload: BatchPayload) -> Result<(), String> {
     let id = new_id();
-    app.state::<Captures>().batch.lock().insert(id.clone(), payload);
-    open_window(app, &id, &format!("batch/{id}"), "NDM - 批量下载", BATCH_WIDTH, BATCH_HEIGHT)
+    app.state::<Captures>()
+        .batch
+        .lock()
+        .insert(id.clone(), payload);
+    if let Err(e) = open_window(
+        app,
+        &id,
+        &format!("batch/{id}"),
+        "NDM - 批量下载",
+        BATCH_WIDTH,
+        BATCH_HEIGHT,
+    ) {
+        app.state::<Captures>().batch.lock().remove(&id);
+        return Err(e);
+    }
+    Ok(())
 }
 
-fn open_window(app: &AppHandle, id: &str, route: &str, title: &str, width: f64, height: f64) -> Result<(), String> {
+/// 清理被系统关闭的确认窗口，避免待确认数据留在内存中。
+pub fn cleanup_window(window: &Window) {
+    let Some(id) = window.label().strip_prefix(LABEL_PREFIX) else {
+        return;
+    };
+    let state = window.app_handle().state::<Captures>();
+    state.single.lock().remove(id);
+    state.batch.lock().remove(id);
+}
 
+fn open_window(
+    app: &AppHandle,
+    id: &str,
+    route: &str,
+    title: &str,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
     // 已打开的卡片数，用于错开叠放
-    let stacked = app.webview_windows().keys().filter(|l| is_capture_window(l)).count();
+    let stacked = app
+        .webview_windows()
+        .keys()
+        .filter(|l| is_capture_window(l))
+        .count();
 
     let window = WebviewWindowBuilder::new(
         app,
@@ -122,7 +173,9 @@ pub fn capture_ready(window: WebviewWindow) {
 pub fn animate_height(window: WebviewWindow, height: f64, duration: u64) {
     std::thread::spawn(move || {
         let scale = window.scale_factor().unwrap_or(1.0);
-        let Ok(size) = window.inner_size() else { return };
+        let Ok(size) = window.inner_size() else {
+            return;
+        };
         let width = size.width as f64 / scale;
         let from = size.height as f64 / scale;
         let total = Duration::from_millis(duration.max(1)).as_secs_f64();

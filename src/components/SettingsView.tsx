@@ -11,7 +11,7 @@ function GithubMark({ size = 14 }: { size?: number }) {
   );
 }
 import { useEffect, useState } from "react";
-import { api, pickDirectory, writeClipboard, type BridgeStatus, type Settings } from "../lib/api";
+import { api, pickDirectory, pickExportPath, pickImportPath, writeClipboard, type BridgeStatus, type Settings } from "../lib/api";
 import { useStore } from "../store";
 import { Segmented, Slider, Switch } from "./ui";
 
@@ -276,6 +276,47 @@ export function SettingsView() {
 
         <Tile icon={<Globe size={18} />} title="User-Agent" desc="部分站点需要浏览器标识才能下载" className="span-2">
           <textarea className="input mono" rows={3} value={ua} onChange={(e) => setUa(e.target.value)} onBlur={() => ua !== settings.userAgent && set("userAgent", ua)} />
+        </Tile>
+
+        <Tile icon={<Copy size={18} />} title="数据备份" desc="导出或恢复任务与设置" className="span-2">
+          <div className="set-row">
+            <span className="muted small">导入前请先暂停所有下载任务</span>
+            <div className="input-group">
+              <button
+                className="btn glass"
+                onClick={async () => {
+                  try {
+                    const path = await pickExportPath("ndm-backup.json");
+                    if (path) {
+                      await api.exportData(path);
+                      showToast("数据已导出");
+                    }
+                  } catch (e) {
+                    showToast(String(e));
+                  }
+                }}
+              >
+                导出
+              </button>
+              <button
+                className="btn glass"
+                onClick={async () => {
+                  try {
+                    const path = await pickImportPath();
+                    if (path) {
+                      await api.importData(path);
+                      await useStore.getState().reload();
+                      showToast("数据已导入");
+                    }
+                  } catch (e) {
+                    showToast(String(e));
+                  }
+                }}
+              >
+                导入
+              </button>
+            </div>
+          </div>
         </Tile>
 
         <div className="tile glass span-2 about-tile">

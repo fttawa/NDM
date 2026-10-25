@@ -93,4 +93,5 @@ docs/           官网（GitHub Pages）与 README 图片，头图源文件在 d
 
 ## 📁 数据位置
 
-任务与设置保存在 `%APPDATA%\com.ndm.app\`（`tasks.json`、`settings.json`）。
+任务与设置保存在 `%APPDATA%\com.ndm.app\state.db`（SQLite）。从旧版本升级时，首次启动会自动迁移同目录下的 `tasks.json` 和 `settings.json`。
+设置页支持将任务与设置导出为 JSON 备份，也可以在暂停下载后恢复备份。若数据库损坏，启动时会自动把原文件重命名为 `state.db.corrupt-时间戳` 后重建。
