@@ -186,7 +186,9 @@ function TaskCardInner({ task }: { task: Task }) {
             <>
               <AnimatedNumber className="speed" mode="smooth" value={task.speed} format={speed} />
               <span>剩余 {eta(remaining, task.speed)}</span>
-              <span>{task.activeConns} 连接</span>
+              <span>
+                {task.activeConns} 连接{task.boost > 0 && <span className="boost">超频 +{task.boost}</span>}
+              </span>
             </>
           )}
           {task.status === "waiting" && <span>排队等待中…</span>}

@@ -12,7 +12,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
@@ -22,6 +22,8 @@ const MIN_SEGMENT: u64 = 1024 * 1024;
 /// 粒度足够细，空闲连接才能接手小文件和尾段
 const MIN_SPLIT: u64 = 256 * 1024;
 const MAX_RETRIES: u32 = 5;
+/// 超频检查周期
+const OVERCLOCK_TICK: Duration = Duration::from_millis(150);
 
 #[derive(Debug)]
 pub enum DlError {
@@ -73,6 +75,8 @@ pub struct SegRt {
     pub end: AtomicU64,
     pub pos: AtomicU64,
     pub assigned: AtomicBool,
+    /// 该分段当前连接的速度（字节/秒，平滑后），未在传输时为 0
+    pub rate: AtomicU64,
 }
 
 impl SegRt {
@@ -82,6 +86,7 @@ impl SegRt {
             end: AtomicU64::new(end),
             pos: AtomicU64::new(pos),
             assigned: AtomicBool::new(assigned),
+            rate: AtomicU64::new(0),
         }
     }
     fn remaining(&self) -> u64 {
@@ -98,7 +103,16 @@ pub struct ActiveRt {
     pub segs: Mutex<Vec<Arc<SegRt>>>,
     pub segmented: AtomicBool,
     pub single: AtomicU64,
+    /// 已建立（连接中 + 传输中）的连接数
     pub conns: AtomicU32,
+    /// 已收到响应、正在传输数据的连接数
+    pub streaming: AtomicU32,
+    /// 存活的下载协程数（含重试等待中的）
+    pub workers: AtomicU32,
+    /// 常规连接数（任务设置的连接数），超出部分为超频连接
+    pub target: AtomicU32,
+    /// 请求发出到收到响应的平均耗时（毫秒），0 表示尚未测得
+    pub latency_ms: AtomicU32,
 }
 
 impl ActiveRt {
@@ -109,7 +123,57 @@ impl ActiveRt {
             segmented: AtomicBool::new(false),
             single: AtomicU64::new(0),
             conns: AtomicU32::new(0),
+            streaming: AtomicU32::new(0),
+            workers: AtomicU32::new(0),
+            target: AtomicU32::new(0),
+            latency_ms: AtomicU32::new(0),
         }
+    }
+
+    /// 记录一次请求延迟（指数平滑）
+    fn record_latency(&self, d: Duration) {
+        let ms = (d.as_millis() as u32).max(1);
+        let _ = self.latency_ms.fetch_update(Ordering::AcqRel, Ordering::Acquire, |old| {
+            Some(if old == 0 { ms } else { (old * 7 + ms * 3) / 10 })
+        });
+    }
+
+    /// 当前超频连接数
+    pub fn boost(&self) -> u32 {
+        let target = self.target.load(Ordering::Acquire);
+        if target == 0 {
+            return 0;
+        }
+        self.workers.load(Ordering::Acquire).saturating_sub(target)
+    }
+
+    /// 还有可分给新连接的工作（未分配的分段，或足够大可拆分的分段）
+    fn has_work(&self) -> bool {
+        self.segs.lock().iter().any(|s| {
+            !s.is_done() && (!s.assigned.load(Ordering::Acquire) || s.remaining() >= MIN_SPLIT * 2)
+        })
+    }
+
+    /// 一个延迟内就会传完、随后空闲的连接数
+    fn finishing(&self, latency_ms: u32) -> u32 {
+        // 留出一个检查周期的余量
+        let horizon = latency_ms as u64 + OVERCLOCK_TICK.as_millis() as u64;
+        self.segs
+            .lock()
+            .iter()
+            .filter(|s| {
+                let rate = s.rate.load(Ordering::Acquire);
+                rate > 0 && !s.is_done() && s.remaining().saturating_mul(1000) / rate <= horizon
+            })
+            .count() as u32
+    }
+
+    /// 连接数超过常规值时让出一个名额（超频连接就位后，多出的连接传完当前分段即退出）
+    fn retire(&self) -> bool {
+        let target = self.target.load(Ordering::Acquire);
+        self.workers
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |w| (w > target).then(|| w - 1))
+            .is_ok()
     }
 
     pub fn downloaded(&self) -> u64 {
@@ -183,6 +247,56 @@ impl Drop for ConnGuard<'_> {
     }
 }
 
+/// 计算需要新开的超频连接数
+///
+/// - `streaming`：正在传输的连接，其中 `finishing` 个会在一个延迟内传完而空闲
+/// - `connecting`：已发出请求、等待响应的连接，很快就会开始传输
+/// - 重试等待中的连接（`workers - streaming - connecting`）视为掉速缺口
+///
+/// 有效连接不足常规连接数时补足，总数不超过 常规 + 超频上限
+fn overclock_needed(target: u32, max_extra: u32, workers: u32, streaming: u32, connecting: u32, finishing: u32) -> u32 {
+    let effective = streaming.saturating_sub(finishing) + connecting;
+    let deficit = target.saturating_sub(effective);
+    let room = (target + max_extra).saturating_sub(workers);
+    deficit.min(room)
+}
+
+/// 每任务超频连接上限：连接数的一半
+pub fn overclock_limit(connections: u32) -> u32 {
+    connections / 2
+}
+
+/// 存活的下载协程计数，`retire` 成功后不再重复扣减
+struct WorkerGuard {
+    rt: Arc<ActiveRt>,
+    retired: bool,
+}
+impl Drop for WorkerGuard {
+    fn drop(&mut self) {
+        if !self.retired {
+            self.rt.workers.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
+}
+
+/// 分段传输期间：计入传输中的连接，结束时清零分段速度
+struct StreamGuard<'a> {
+    rt: &'a ActiveRt,
+    seg: &'a SegRt,
+}
+impl<'a> StreamGuard<'a> {
+    fn new(rt: &'a ActiveRt, seg: &'a SegRt) -> Self {
+        rt.streaming.fetch_add(1, Ordering::AcqRel);
+        Self { rt, seg }
+    }
+}
+impl Drop for StreamGuard<'_> {
+    fn drop(&mut self) {
+        self.seg.rate.store(0, Ordering::Release);
+        self.rt.streaming.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 /// 下载源：URL 与附加请求头（来自浏览器的 Cookie、Referer、User-Agent 等）
 #[derive(Clone)]
 struct Source {
@@ -217,12 +331,14 @@ struct ProbeInfo {
     mime: Option<String>,
 }
 
-async fn probe(client: &reqwest::Client, src: &Source, cancel: &CancellationToken) -> Result<ProbeInfo, DlError> {
+async fn probe(client: &reqwest::Client, src: &Source, rt: &ActiveRt) -> Result<ProbeInfo, DlError> {
+    let t0 = Instant::now();
     let req = src.get(client).header(RANGE, "bytes=0-").send();
     let resp = tokio::select! {
         r = req => r?,
-        _ = cancel.cancelled() => return Err(DlError::Cancelled),
+        _ = rt.cancel.cancelled() => return Err(DlError::Cancelled),
     };
+    rt.record_latency(t0.elapsed());
     let status = resp.status();
     if !status.is_success() {
         return Err(DlError::Other(format!("服务器返回 HTTP {}", status.as_u16())));
@@ -287,7 +403,7 @@ async fn run_once(mgr: &Arc<Manager>, id: &str, rt: &Arc<ActiveRt>) -> Result<()
 
     // 没有可续传的进度时重新探测
     if !(task.resumable && !task.segments.is_empty()) {
-        let info = probe(&client, &Source::from_task(&task), &rt.cancel).await?;
+        let info = probe(&client, &Source::from_task(&task), rt).await?;
         if !task.name_locked {
             let raw = info.file_name.clone().unwrap_or_else(|| task.file_name.clone());
             let clean = util::sanitize(&raw);
@@ -372,8 +488,11 @@ async fn segmented(
 
     let worker_cancel = rt.cancel.child_token();
     let src = Source::from_task(task);
+    let target = task.connections.max(1);
+    rt.target.store(target, Ordering::Release);
     let mut set = JoinSet::new();
-    for _ in 0..task.connections.max(1) {
+    let spawn = |set: &mut JoinSet<Result<(), DlError>>| {
+        rt.workers.fetch_add(1, Ordering::AcqRel);
         set.spawn(worker(
             mgr.clone(),
             src.clone(),
@@ -381,11 +500,46 @@ async fn segmented(
             rt.clone(),
             worker_cancel.clone(),
         ));
+    };
+    for _ in 0..target {
+        spawn(&mut set);
     }
 
     let mut first_err: Option<DlError> = None;
     let mut no_range = false;
-    while let Some(res) = set.join_next().await {
+    let mut tick = tokio::time::interval(OVERCLOCK_TICK);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        let res = tokio::select! {
+            r = set.join_next() => match r {
+                Some(r) => r,
+                None => break,
+            },
+            _ = tick.tick() => {
+                // 超频：预判即将空闲 / 正在重试的连接，提前补上新连接
+                if !worker_cancel.is_cancelled() && mgr.settings().overclock {
+                    let latency = rt.latency_ms.load(Ordering::Acquire);
+                    let streaming = rt.streaming.load(Ordering::Acquire);
+                    let connecting = rt.conns.load(Ordering::Acquire).saturating_sub(streaming);
+                    let finishing = if latency > 0 { rt.finishing(latency) } else { 0 };
+                    let need = overclock_needed(
+                        target,
+                        overclock_limit(target),
+                        rt.workers.load(Ordering::Acquire),
+                        streaming,
+                        connecting,
+                        finishing,
+                    );
+                    for _ in 0..need {
+                        if !rt.has_work() {
+                            break;
+                        }
+                        spawn(&mut set);
+                    }
+                }
+                continue;
+            }
+        };
         match res {
             Ok(Ok(())) | Ok(Err(DlError::Cancelled)) => {}
             Ok(Err(DlError::NoRange)) => {
@@ -424,9 +578,15 @@ async fn worker(
     cancel: CancellationToken,
 ) -> Result<(), DlError> {
     let client = mgr.client();
+    let mut guard = WorkerGuard { rt: rt.clone(), retired: false };
     loop {
         if cancel.is_cancelled() {
             return Err(DlError::Cancelled);
+        }
+        // 连接数高于常规值（超频补上的连接已就位）时，传完当前分段就退出
+        if rt.retire() {
+            guard.retired = true;
+            return Ok(());
         }
         let Some(seg) = rt.take_segment() else {
             return Ok(());
@@ -435,7 +595,7 @@ async fn worker(
         loop {
             let res = {
                 let _guard = ConnGuard::new(&rt.conns);
-                fetch_segment(&mgr, &client, &src, &file, &seg, &cancel).await
+                fetch_segment(&mgr, &client, &src, &file, &rt, &seg, &cancel).await
             };
             match res {
                 Ok(()) => break,
@@ -464,6 +624,7 @@ async fn fetch_segment(
     client: &reqwest::Client,
     src: &Source,
     file: &File,
+    rt: &ActiveRt,
     seg: &SegRt,
     cancel: &CancellationToken,
 ) -> Result<(), DlError> {
@@ -472,11 +633,13 @@ async fn fetch_segment(
     if pos > end {
         return Ok(());
     }
+    let t0 = Instant::now();
     let req = src.get(client).header(RANGE, format!("bytes={pos}-{end}")).send();
     let resp = tokio::select! {
         r = req => r?,
         _ = cancel.cancelled() => return Err(DlError::Cancelled),
     };
+    rt.record_latency(t0.elapsed());
     let status = resp.status();
     if status == StatusCode::OK {
         if pos != 0 {
@@ -486,7 +649,11 @@ async fn fetch_segment(
         return Err(DlError::Other(format!("服务器返回 HTTP {}", status.as_u16())));
     }
 
+    let _streaming = StreamGuard::new(rt, seg);
     let mut stream = resp.bytes_stream();
+    // 分段速度采样，用于预判何时传完
+    let mut sample_t = Instant::now();
+    let mut sample_pos = pos;
     loop {
         let next = tokio::select! {
             c = stream.next() => c,
@@ -502,6 +669,14 @@ async fn fetch_segment(
             }
         }
         let pos = seg.pos.load(Ordering::Acquire);
+        let dt = sample_t.elapsed();
+        if dt >= Duration::from_millis(300) {
+            let inst = pos.saturating_sub(sample_pos) * 1000 / dt.as_millis().max(1) as u64;
+            let old = seg.rate.load(Ordering::Acquire);
+            seg.rate.store(if old == 0 { inst } else { (old * 6 + inst * 4) / 10 }, Ordering::Release);
+            sample_t = Instant::now();
+            sample_pos = pos;
+        }
         let end = seg.end.load(Ordering::Acquire);
         if pos > end {
             return Ok(());
@@ -607,6 +782,46 @@ mod tests {
         drop(segs);
         // 下载量统计不受拆分影响
         assert_eq!(rt.downloaded(), 3 * mb + 2 * mb);
+    }
+
+    #[test]
+    fn overclock_fills_finishing_connections() {
+        // 8 连接全部在传输，其中 3 个即将传完：补 3 个
+        assert_eq!(overclock_needed(8, 4, 8, 8, 0, 3), 3);
+        // 已有 2 个在连接中，只需再补 1 个
+        assert_eq!(overclock_needed(8, 4, 10, 8, 2, 3), 1);
+        // 超频上限：最多 常规 + 一半
+        assert_eq!(overclock_needed(8, 4, 12, 4, 0, 4), 0);
+        assert_eq!(overclock_needed(8, 4, 8, 2, 0, 0), 4);
+        // 初始阶段全部在连接中，不超频
+        assert_eq!(overclock_needed(8, 4, 8, 0, 8, 0), 0);
+        // 单连接任务没有超频名额
+        assert_eq!(overclock_needed(1, overclock_limit(1), 1, 1, 0, 1), 0);
+    }
+
+    #[test]
+    fn finishing_uses_latency() {
+        let mb = 1024 * 1024;
+        let rt = rt_with(&[(0, mb - 1, mb - 100_000, true), (mb, 2 * mb - 1, mb, true)]);
+        {
+            let segs = rt.segs.lock();
+            segs[0].rate.store(1_000_000, Ordering::Release); // 剩 100KB，约 100ms 传完
+            segs[1].rate.store(1_000_000, Ordering::Release); // 剩 1MB，约 1s
+        }
+        assert_eq!(rt.finishing(50), 1);
+        assert_eq!(rt.finishing(2000), 2);
+    }
+
+    #[test]
+    fn retire_only_above_target() {
+        let rt = ActiveRt::new();
+        rt.target.store(4, Ordering::Release);
+        rt.workers.store(6, Ordering::Release);
+        assert_eq!(rt.boost(), 2);
+        assert!(rt.retire());
+        assert!(rt.retire());
+        assert!(!rt.retire());
+        assert_eq!(rt.workers.load(Ordering::Acquire), 4);
     }
 
     #[test]

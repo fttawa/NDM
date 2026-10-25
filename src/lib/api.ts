@@ -26,6 +26,10 @@ export interface Task {
   mime: string | null;
   speed: number;
   activeConns: number;
+  /** 当前超频连接数 */
+  boost: number;
+  /** 请求延迟（毫秒），0 表示未测得 */
+  latencyMs: number;
 }
 
 export interface Progress {
@@ -34,6 +38,8 @@ export interface Progress {
   total: number | null;
   speed: number;
   activeConns: number;
+  boost: number;
+  latencyMs: number;
   segments: Segment[];
 }
 
@@ -52,6 +58,8 @@ export interface Settings {
   captureConfirm: boolean;
   proxyMode: "system" | "none" | "custom";
   proxyUrl: string;
+  /** 连接超频：按请求延迟提前补连接，最多加开每任务连接数的一半 */
+  overclock: boolean;
 }
 
 /** 浏览器扩展转交的下载（需要用户确认） */
@@ -238,6 +246,7 @@ function createMock(): Backend {
     glass: "acrylic",
     browserIntegration: true,
     captureConfirm: true,
+    overclock: true,
     proxyMode: "system",
     proxyUrl: "",
   };
@@ -270,6 +279,8 @@ function createMock(): Backend {
       mime: null,
       speed: 0,
       activeConns: 0,
+      boost: 0,
+      latencyMs: 0,
     };
   };
   let tasks: Task[] = [
@@ -318,6 +329,11 @@ function createMock(): Backend {
       t.downloaded = t.segments.reduce((a, s) => a + s.pos - s.start, 0);
       t.speed = delta * 2;
       t.activeConns = t.segments.filter((s) => s.pos <= s.end).length;
+      // 模拟超频：尾段较多时临时多开几条连接
+      const tail = t.segments.filter((s) => s.pos <= s.end && s.end + 1 - s.pos < 2 * MB).length;
+      t.boost = settings.overclock ? Math.min(Math.floor(t.connections / 2), tail) : 0;
+      t.activeConns += t.boost;
+      t.latencyMs = Math.round(180 + 40 * Math.sin(Date.now() / 5000));
       if (t.downloaded >= t.total) {
         t.status = "completed";
         t.speed = 0;
@@ -332,6 +348,8 @@ function createMock(): Backend {
         total: t.total,
         speed: t.speed,
         activeConns: t.activeConns,
+        boost: t.boost,
+        latencyMs: t.latencyMs,
         segments: t.segments.map((s) => ({ ...s })),
       });
     }

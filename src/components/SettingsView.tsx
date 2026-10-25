@@ -131,6 +131,10 @@ export function SettingsView() {
         <Tile icon={<Zap size={18} />} title="每任务连接数" desc="分段并发数，越大越快">
           <div className="big-value">{settings.connections}</div>
           <Slider value={settings.connections} min={1} max={32} onChange={(v) => set("connections", v)} />
+          <label className="set-row" title="测量请求到服务器开始传输数据的延迟，预判即将传完或重试中的连接，提前补上新连接防止掉速">
+            <span>超频（最多 +{Math.floor(settings.connections / 2)}）</span>
+            <Switch checked={settings.overclock} onChange={(v) => set("overclock", v)} />
+          </label>
         </Tile>
 
         <Tile icon={<Gauge size={18} />} title="全局限速" desc="0 表示不限速" className="span-2">

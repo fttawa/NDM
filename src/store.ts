@@ -50,13 +50,13 @@ interface State {
 
 function mergeProgress(tasks: Task[], progress: Progress[]): Task[] {
   if (progress.length === 0) {
-    return tasks.some((t) => t.speed > 0) ? tasks.map((t) => (t.speed ? { ...t, speed: 0, activeConns: 0 } : t)) : tasks;
+    return tasks.some((t) => t.speed > 0) ? tasks.map((t) => (t.speed ? { ...t, speed: 0, activeConns: 0, boost: 0 } : t)) : tasks;
   }
   const map = new Map(progress.map((p) => [p.id, p]));
   return tasks.map((t) => {
     const p = map.get(t.id);
     if (!p) return t.status === "active" ? t : t.speed ? { ...t, speed: 0 } : t;
-    return { ...t, downloaded: p.downloaded, total: p.total, speed: p.speed, activeConns: p.activeConns, segments: p.segments };
+    return { ...t, downloaded: p.downloaded, total: p.total, speed: p.speed, activeConns: p.activeConns, boost: p.boost, latencyMs: p.latencyMs, segments: p.segments };
   });
 }
 

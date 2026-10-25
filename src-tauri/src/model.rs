@@ -52,6 +52,12 @@ pub struct Task {
     pub speed: u64,
     #[serde(default)]
     pub active_conns: u32,
+    /// 当前超频连接数
+    #[serde(default)]
+    pub boost: u32,
+    /// 请求延迟（毫秒），0 表示未测得
+    #[serde(default)]
+    pub latency_ms: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -77,6 +83,8 @@ pub struct Settings {
     pub proxy_mode: String,
     /// 自定义代理地址，如 http://127.0.0.1:7890、socks5://user:pass@host:1080
     pub proxy_url: String,
+    /// 连接超频：按测得的请求延迟提前补连接，最多加开每任务连接数的一半
+    pub overclock: bool,
 }
 
 impl Default for Settings {
@@ -96,6 +104,7 @@ impl Default for Settings {
             capture_confirm: true,
             proxy_mode: "system".into(),
             proxy_url: String::new(),
+            overclock: true,
         }
     }
 }
@@ -108,6 +117,8 @@ pub struct Progress {
     pub total: Option<u64>,
     pub speed: u64,
     pub active_conns: u32,
+    pub boost: u32,
+    pub latency_ms: u32,
     pub segments: Vec<Segment>,
 }
 

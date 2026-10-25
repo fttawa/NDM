@@ -103,6 +103,7 @@ impl Manager {
         for t in tasks.iter_mut() {
             t.speed = 0;
             t.active_conns = 0;
+            t.boost = 0;
             if matches!(t.status, Status::Active | Status::Waiting) {
                 t.status = if settings.resume_on_start { Status::Waiting } else { Status::Paused };
             }
@@ -247,6 +248,7 @@ impl Manager {
                 t.downloaded = rt.downloaded();
                 t.speed = 0;
                 t.active_conns = 0;
+                t.boost = 0;
                 match res {
                     Ok(()) => {
                         t.status = Status::Completed;
@@ -318,16 +320,22 @@ impl Manager {
                     let dt = now.duration_since(t0).as_secs_f64();
                     let speed = if dt > 0.05 { downloaded.saturating_sub(b0) as f64 / dt } else { 0.0 };
                     let conns = rt.conns.load(std::sync::atomic::Ordering::Acquire);
+                    let boost = rt.boost();
+                    let latency_ms = rt.latency_ms.load(std::sync::atomic::Ordering::Acquire);
                     if let Some(t) = tasks.iter_mut().find(|t| &t.id == id) {
                         t.downloaded = downloaded;
                         t.speed = speed as u64;
                         t.active_conns = conns;
+                        t.boost = boost;
+                        t.latency_ms = latency_ms;
                         progress.push(Progress {
                             id: id.clone(),
                             downloaded,
                             total: t.total,
                             speed: speed as u64,
                             active_conns: conns,
+                            boost,
+                            latency_ms,
                             segments: rt.segments(),
                         });
                     }
@@ -407,6 +415,8 @@ impl Manager {
                 headers: opts.headers.clone(),
                 speed: 0,
                 active_conns: 0,
+                boost: 0,
+                latency_ms: 0,
             });
         }
         {
