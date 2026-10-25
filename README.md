@@ -15,6 +15,8 @@
 
 ---
 
+官网：https://fttawa.github.io/NDM/
+
 NDM 是一个基于 Tauri 2 + Rust 的多线程下载管理器，目标是成为 IDM 的开源替代品。界面参考 Motrix，采用 Bento Grid 布局、深色中性灰与毛玻璃材质；安装包只有约 2 MB。
 
 <p align="center">
@@ -85,7 +87,7 @@ pnpm tauri build
 src/            React 19 前端（zustand、lucide-react）
 src-tauri/      Rust 后端：下载引擎、任务管理、扩展桥接、确认卡片窗口
 extension/      Chrome / Edge 扩展（MV3）
-docs/           README 图片（头图源文件在 docs/banner/）
+docs/           官网（GitHub Pages）与 README 图片，头图源文件在 docs/banner/
 ```
 
 ## 📁 数据位置
