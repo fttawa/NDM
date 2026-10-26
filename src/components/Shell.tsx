@@ -1,4 +1,4 @@
-import { ArrowDownToLine, Minus, Plus, Settings2, Square, X } from "lucide-react";
+import { ArrowDownToLine, House, Minus, Settings2, Square, X } from "lucide-react";
 import { windowAction } from "../lib/api";
 import { speed } from "../lib/format";
 import { useStore } from "../store";
@@ -33,24 +33,23 @@ export function TitleBar() {
 export function Sidebar() {
   const view = useStore((s) => s.view);
   const setView = useStore((s) => s.setView);
-  const openAdd = useStore((s) => s.openAdd);
-  const activeCount = useStore((s) => s.tasks.filter((t) => t.status === "active").length);
 
   return (
-    <nav className="sidebar" data-tauri-drag-region>
+    <nav className="sidebar" aria-label="主导航">
       <div className="logo" data-tauri-drag-region>
-        <img src="/app-icon.svg" alt="NDM" />
+        <img src="/app-icon.svg" alt="" /><strong data-tauri-drag-region>NDM</strong>
       </div>
       <div className="nav">
-        <button className={`nav-btn ${view === "tasks" ? "active" : ""}`} onClick={() => setView("tasks")} title="任务">
-          <ArrowDownToLine size={20} />
-          {activeCount > 0 && <span className="badge">{activeCount}</span>}
+        <button className={`nav-btn ${view === "home" ? "active" : ""}`} onClick={() => setView("home")} aria-current={view === "home" ? "page" : undefined}>
+          <House size={18} /><span>首页</span>
         </button>
-        <button className="nav-btn add" onClick={() => openAdd()} title="新建任务 (Ctrl+N)">
-          <Plus size={22} />
+        <button className={`nav-btn ${view === "tasks" ? "active" : ""}`} onClick={() => setView("tasks")} aria-current={view === "tasks" ? "page" : undefined}>
+          <ArrowDownToLine size={18} /><span>下载</span>
         </button>
-        <button className={`nav-btn ${view === "settings" ? "active" : ""}`} onClick={() => setView("settings")} title="设置">
-          <Settings2 size={20} />
+      </div>
+      <div className="nav-footer">
+        <button className={`nav-btn ${view === "settings" ? "active" : ""}`} onClick={() => setView("settings")} aria-current={view === "settings" ? "page" : undefined}>
+          <Settings2 size={18} /><span>设置</span>
         </button>
       </div>
     </nav>

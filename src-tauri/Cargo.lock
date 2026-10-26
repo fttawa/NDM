@@ -2390,7 +2390,7 @@ dependencies = [
 
 [[package]]
 name = "ndm"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "fs2",
  "futures-util",

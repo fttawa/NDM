@@ -99,7 +99,7 @@ button {
 .app {
   position: relative;
   display: grid;
-  grid-template-columns: 78px 1fr;
+  grid-template-columns: 164px minmax(0, 1fr);
   height: 100%;
   isolation: isolate;
 }
@@ -127,10 +127,10 @@ button {
   pointer-events: none;
 }
 
-/* ============ 侧边栏（Motrix 风格深色玻璃） ============ */
+/* ============ 侧边栏 ============ */
 .sidebar {
   margin: 10px 0 10px 10px;
-  padding: 16px 0 14px;
+  padding: 20px 12px 14px;
   border-radius: 22px;
   background: var(--side);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -138,70 +138,50 @@ button {
   -webkit-backdrop-filter: blur(30px) saturate(160%);
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 18px;
+  gap: 28px;
+  min-height: 0;
+  overflow-y: auto;
 }
-.nav {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 10px;
-}
+.logo { display: flex; align-items: center; gap: 10px; padding: 0 6px; }
+.logo strong { display: block; font-size: 19px; letter-spacing: 1px; }
+.nav { flex: 1; display: flex; flex-direction: column; gap: 4px; }
 .nav-btn {
   position: relative;
-  width: 46px;
-  height: 46px;
-  border-radius: 14px;
+  width: 100%;
+  min-height: 42px;
+  flex-shrink: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
   border: 0;
   background: transparent;
   color: var(--side-text);
-  display: grid;
-  place-items: center;
-  transition: background 0.2s, color 0.2s, transform 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  text-align: left;
+  transition: background 0.2s, color 0.2s;
 }
-.nav-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
-}
-.nav-btn:active {
-  transform: scale(0.94);
-}
-.nav-btn.active {
-  background: rgba(255, 255, 255, 0.14);
-  color: #fff;
-}
-.nav-btn.active::before {
-  content: "";
-  position: absolute;
-  left: -12px;
-  top: 12px;
-  bottom: 12px;
-  width: 4px;
-  border-radius: 0 4px 4px 0;
-  background: var(--accent);
-}
-.nav-btn.add {
-  background: var(--accent);
-  color: var(--on-accent);
-}
-.nav-btn.add:hover {
-  background: #e6e6e6;
-}
-.badge {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  min-width: 17px;
-  height: 17px;
-  padding: 0 4px;
-  border-radius: 9px;
-  background: var(--accent);
-  color: var(--on-accent);
-  font-size: 10.5px;
-  font-weight: 700;
-  line-height: 17px;
-}
+.nav-btn svg { flex-shrink: 0; }
+.nav-btn:hover { background: rgba(255, 255, 255, 0.07); color: #fff; }
+.nav-btn.active { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.nav-btn.active::before { content: ""; position: absolute; left: -6px; top: 13px; bottom: 13px; width: 3px; border-radius: 3px; background: var(--accent); }
+.nav-footer { border-top: 1px solid var(--line); padding-top: 10px; }
+.nav-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tile-stat-link { text-align: left; }
+.tile-stat-link:hover { background: var(--glass-hover); }
+.toolbar-actions { flex-wrap: wrap; }
+.page-count { font-size: 14px; font-weight: 400; color: var(--text-3); vertical-align: middle; margin-left: 6px; }
+.download-filters { display: flex; flex-wrap: wrap; gap: 4px; }
+.download-filters button { border: 0; background: transparent; color: var(--text-2); padding: 7px 12px; border-radius: 8px; font-size: 13px; }
+.download-filters button:hover { color: var(--text); background: var(--input); }
+.download-filters button.active { color: var(--text); background: var(--accent-soft); }
+.download-more { position: relative; margin-left: auto; }
+.download-more summary { display: flex; align-items: center; padding: 8px; cursor: pointer; border-radius: 8px; list-style: none; color: var(--text-2); }
+.download-more summary::-webkit-details-marker { display: none; }
+.download-more summary:hover, .download-more[open] summary { background: var(--input); color: var(--text); }
+.download-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 10; padding: 6px; border-radius: 12px; min-width: 160px; box-shadow: var(--overlay-shadow); }
+.download-menu .btn { width: 100%; justify-content: flex-start; background: transparent; border: 0; }
+.download-menu .btn:hover { background: var(--glass-hover); }
 
 /* ============ 主区域 ============ */
 .main {

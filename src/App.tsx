@@ -3,6 +3,7 @@ import { AddTaskModal, ConfirmRemoveModal } from "./components/Modals";
 import { SettingsView } from "./components/SettingsView";
 import { Sidebar, TitleBar, Toast } from "./components/Shell";
 import { TaskDrawer } from "./components/TaskDrawer";
+import { HomeView } from "./components/HomeView";
 import { TasksView } from "./components/TasksView";
 import { api, isTauri, readClipboard, type Settings } from "./lib/api";
 import { extractUrls } from "./lib/format";
@@ -14,6 +15,7 @@ const isEditable = (el: EventTarget | null) =>
 export default function App() {
   const init = useStore((s) => s.init);
   const view = useStore((s) => s.view);
+  const filter = useStore((s) => s.filter);
   const settings = useStore((s) => s.settings);
   const openAdd = useStore((s) => s.openAdd);
   const lastClip = useRef<string | null>(null);
@@ -98,7 +100,7 @@ export default function App() {
       <Sidebar />
       <main className="main">
         <TitleBar />
-        <div className="content">{view === "tasks" ? <TasksView /> : <SettingsView />}</div>
+        <div className="content" key={`${view}-${filter}`}>{view === "home" ? <HomeView /> : view === "tasks" ? <TasksView /> : <SettingsView />}</div>
       </main>
       <TaskDrawer />
       <AddTaskModal />

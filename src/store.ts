@@ -10,8 +10,17 @@ export interface AddPrefill {
   referrer?: string;
 }
 
-export type Filter = "all" | "active" | "waiting" | "completed" | "stopped";
-export type View = "tasks" | "settings";
+export type Filter = "all" | "active" | "waiting" | "completed" | "paused" | "error";
+export type View = "home" | "tasks" | "settings";
+
+export const DOWNLOAD_FILTERS: { value: Filter; label: string }[] = [
+  { value: "all", label: "全部下载" },
+  { value: "active", label: "下载中" },
+  { value: "waiting", label: "等待中" },
+  { value: "paused", label: "已暂停" },
+  { value: "error", label: "下载失败" },
+  { value: "completed", label: "已完成" },
+];
 
 export const HISTORY = 60;
 /** 速度曲线采样间隔，与图表滚动动画时长一致 */
@@ -38,6 +47,7 @@ interface State {
   reload: () => Promise<void>;
   setFilter: (f: Filter) => void;
   setView: (v: View) => void;
+  openDownloads: (filter?: Filter) => void;
   openAdd: (prefill?: string | AddPrefill) => void;
   closeAdd: () => void;
   select: (id: string | null) => void;
@@ -69,7 +79,7 @@ export const useStore = create<State>((set, get) => ({
   settings: null,
   speedHistory: Array.from({ length: HISTORY }, (_, i) => ({ t: performance.now() - (HISTORY - 1 - i) * SAMPLE_MS, v: 0 })),
   filter: "all",
-  view: "tasks",
+  view: "home",
   addOpen: false,
   addPrefill: { text: "" },
   selectedId: null,
@@ -123,8 +133,9 @@ export const useStore = create<State>((set, get) => ({
     set({ tasks, settings, checked: [], selectedId: null });
   },
 
-  setFilter: (filter) => set({ filter }),
-  setView: (view) => set({ view }),
+  setFilter: (filter) => set({ filter, checked: [], lastChecked: null }),
+  setView: (view) => set({ view, checked: [], lastChecked: null, selectedId: null }),
+  openDownloads: (filter = "all") => set({ view: "tasks", filter, checked: [], lastChecked: null, selectedId: null }),
   openAdd: (prefill = "") => set({ addOpen: true, addPrefill: typeof prefill === "string" ? { text: prefill } : prefill }),
   closeAdd: () => set({ addOpen: false, addPrefill: { text: "" } }),
   select: (selectedId) => set({ selectedId }),
@@ -175,8 +186,10 @@ export function filterTasks(tasks: Task[], f: Filter): Task[] {
       return tasks.filter((t) => t.status === "waiting");
     case "completed":
       return tasks.filter((t) => t.status === "completed");
-    case "stopped":
-      return tasks.filter((t) => t.status === "paused" || t.status === "error");
+    case "paused":
+      return tasks.filter((t) => t.status === "paused");
+    case "error":
+      return tasks.filter((t) => t.status === "error");
     default:
       return tasks;
   }

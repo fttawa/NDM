@@ -73,6 +73,7 @@ export function AddTaskModal() {
         start,
         headers: prefill.headers,
       });
+      useStore.getState().openDownloads();
       showToast(`已添加 ${urls.length} 个任务`);
       close();
     } catch (e) {
