@@ -225,13 +225,25 @@
 
   /* 常见问题 */
   .faq { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
-  details { border-radius: 16px; padding: 0 22px; }
-  details[open] { background: var(--glass-hover); }
-  summary { cursor: pointer; list-style: none; padding: 18px 0; font-weight: 700; display: flex; align-items: center; gap: 12px; }
+  details { border-radius: 16px; padding: 0 22px; overflow: hidden; transition: background .3s, border-color .3s; }
+  details[open] { background: var(--glass-hover); border-color: var(--border-2); }
+  summary { cursor: pointer; list-style: none; padding: 18px 0; font-weight: 700; display: flex; align-items: center; gap: 12px; transition: color .2s; }
+  summary:hover { color: #fff; }
   summary::-webkit-details-marker { display: none; }
-  summary::after { content: "+"; margin-left: auto; color: var(--text-3); font-weight: 400; font-size: 20px; line-height: 1; }
-  details[open] summary::after { content: "−"; }
+  /* 加号：竖线旋转放平变成减号 */
+  summary::before, summary::after {
+    content: ""; order: 2; flex: none; width: 14px; height: 2px; border-radius: 1px;
+    background: var(--text-3); transition: transform .35s cubic-bezier(.2, .8, .2, 1), background .2s;
+  }
+  summary::before { margin-left: auto; }
+  summary::after { margin-left: -26px; transform: rotate(90deg); }
+  details[open] summary::after { transform: rotate(0deg); }
+  details.closing summary::after { transform: rotate(90deg); }
+  details.closing { background: var(--glass); border-color: var(--border); }
+  summary:hover::before, summary:hover::after { background: var(--text-2); }
   details p { margin: 0 0 18px; color: var(--text-2); font-size: 15px; }
+  details.opening p { animation: answer-in .4s .05s cubic-bezier(.2, .8, .2, 1) both; }
+  @keyframes answer-in { from { opacity: 0; transform: translateY(-6px); } }
 
   /* 底部下载 */
   .final { text-align: center; border-radius: 28px; padding: 64px 24px; }
@@ -684,6 +696,35 @@
         }
       }, { threshold: 0.15, rootMargin: "0px 0px -40px 0px" });
       items.forEach((el) => io.observe(el));
+    }
+
+    // ---------- 常见问题：展开 / 收起时高度平滑过渡 ----------
+    if (!reduce) {
+      document.querySelectorAll(".faq details").forEach((d) => {
+        const summary = d.querySelector("summary");
+        let anim = null;
+        const animate = (from, to, done) => {
+          anim?.cancel();
+          anim = d.animate({ height: [`${from}px`, `${to}px`] }, { duration: 320, easing: "cubic-bezier(.2,.8,.2,1)" });
+          anim.onfinish = () => { anim = null; done?.(); };
+        };
+        summary.addEventListener("click", (e) => {
+          e.preventDefault();
+          const start = d.offsetHeight;
+          const border = d.offsetHeight - d.clientHeight; // 上下边框
+          if (d.open && !d.classList.contains("closing")) {
+            // 收起：先缩到只剩标题，再真正关闭
+            d.classList.add("closing");
+            d.classList.remove("opening");
+            animate(start, summary.offsetHeight + border, () => { d.open = false; d.classList.remove("closing"); });
+          } else {
+            d.classList.remove("closing");
+            d.classList.add("opening");
+            d.open = true;
+            animate(start, d.scrollHeight + border);
+          }
+        });
+      });
     }
 
     // ---------- 3D 卡片 ----------
