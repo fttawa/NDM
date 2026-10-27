@@ -236,13 +236,71 @@
     .stat b { font-size: 28px; }
     section { padding: 64px 0; }
   }
+  /* ---------- 背景与鼠标特效 ---------- */
+  /* 背景色块缓慢漂移 */
+  .bg i:nth-child(1) { animation: drift-a 38s ease-in-out infinite alternate; }
+  .bg i:nth-child(2) { animation: drift-b 46s ease-in-out infinite alternate; }
+  .bg i:nth-child(3) { animation: drift-c 42s ease-in-out infinite alternate; }
+  @keyframes drift-a { to { transform: translate(-140px, 120px) scale(1.12); } }
+  @keyframes drift-b { to { transform: translate(180px, -90px) scale(0.92); } }
+  @keyframes drift-c { to { transform: translate(-120px, -140px) scale(1.08); } }
+
+  /* 鼠标附近显出点阵 + 一圈柔和的亮光 */
+  .pointer { position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: 0; transition: opacity .4s; }
+  .pointer.on { opacity: 1; }
+  .pointer::before, .pointer::after { content: ""; position: absolute; inset: 0; }
+  .pointer::before {
+    background-image: radial-gradient(rgba(255, 255, 255, .22) 1px, transparent 1.5px);
+    background-size: 22px 22px;
+    -webkit-mask-image: radial-gradient(260px circle at var(--mx) var(--my), #000, transparent 70%);
+    mask-image: radial-gradient(260px circle at var(--mx) var(--my), #000, transparent 70%);
+  }
+  .pointer::after { background: radial-gradient(520px circle at var(--mx) var(--my), rgba(255, 255, 255, .045), transparent 65%); }
+
+  /* 卡片：鼠标靠近时边框与表面跟随亮起 */
+  .spot { position: relative; }
+  .spot::before {
+    content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; pointer-events: none;
+    background: radial-gradient(220px circle at var(--x, -999px) var(--y, -999px), rgba(255, 255, 255, .32), transparent 70%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  }
+  .glass.spot { background-image: radial-gradient(360px circle at var(--x, -999px) var(--y, -999px), rgba(255, 255, 255, .045), transparent 60%); }
+
+  /* ---------- 入场与滚动动画 ---------- */
+  /* 首屏：依次浮现 */
+  .hero .badge, .hero h1, .hero .lead, .hero .cta, .hero .meta, .hero .window {
+    animation: rise .8s cubic-bezier(.2, .8, .2, 1) both;
+  }
+  .hero h1 { animation-delay: .08s; }
+  .hero .lead { animation-delay: .16s; }
+  .hero .cta { animation-delay: .24s; }
+  .hero .meta { animation-delay: .3s; }
+  .hero .window { animation-delay: .38s; animation-duration: 1s; }
+  @keyframes rise { from { opacity: 0; transform: translateY(18px); } }
+
+  /* 滚动到视口时渐入（由脚本加上 .reveal，没有脚本时内容照常显示） */
+  .reveal {
+    opacity: 0; transform: translateY(20px);
+    transition: opacity .7s ease, transform .7s cubic-bezier(.2, .8, .2, 1);
+    transition-delay: var(--d, 0ms);
+  }
+  .reveal.in { opacity: 1; transform: none; }
+
   @media (prefers-reduced-motion: reduce) {
     html { scroll-behavior: auto; }
+    .bg i, .hero * { animation: none !important; }
+    .reveal { opacity: 1; transform: none; transition: none; }
+  }
+  @media (hover: none) {
+    .pointer, .spot::before { display: none; }
   }
 </style>
 </head>
 <body>
   <div class="bg" aria-hidden="true"><i></i><i></i><i></i></div>
+  <div class="pointer" aria-hidden="true"></div>
 
   <nav class="topnav">
     <div class="wrap">
@@ -582,6 +640,83 @@
     new IntersectionObserver((entries, obs) => {
       if (entries[0].isIntersecting) { run(); obs.disconnect(); }
     }, { threshold: 0.4 }).observe(document.getElementById("race"));
+
+    // ---------- 滚动渐入 + 数字滚动 ----------
+    if (!reduce && "IntersectionObserver" in window) {
+      const groups = [".stats .stat", ".sec-head", ".race", ".how .card", ".bento .tile", ".steps .step", ".ext-demo", ".log-item", ".faq details", ".final"];
+      const items = [];
+      for (const sel of groups) {
+        // 同一组内依次延迟，形成错落的入场
+        document.querySelectorAll(sel).forEach((el, i) => {
+          el.classList.add("reveal");
+          el.style.setProperty("--d", `${Math.min(i, 6) * 70}ms`);
+          items.push(el);
+        });
+      }
+      const countUp = (el) => {
+        const node = el.firstChild;
+        const [, prefix, num] = /^(\D*)(\d+)$/.exec(node.textContent.trim()) || [];
+        const target = Number(num);
+        if (!target) return;
+        const t0 = performance.now();
+        const tick = (now) => {
+          const k = Math.min(1, (now - t0) / 1000);
+          node.textContent = prefix + Math.round(target * (1 - Math.pow(1 - k, 3)));
+          if (k < 1) requestAnimationFrame(tick);
+        };
+        node.textContent = prefix + "0";
+        requestAnimationFrame(tick);
+      };
+      const io = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          const el = e.target;
+          el.classList.add("in");
+          io.unobserve(el);
+          if (el.classList.contains("stat")) countUp(el.querySelector("b"));
+          // 入场结束后移除动画类，恢复卡片自身的悬停过渡
+          const done = (ev) => {
+            if (ev.target !== el || ev.propertyName !== "transform") return;
+            el.classList.remove("reveal", "in");
+            el.removeEventListener("transitionend", done);
+          };
+          el.addEventListener("transitionend", done);
+        }
+      }, { threshold: 0.15, rootMargin: "0px 0px -40px 0px" });
+      items.forEach((el) => io.observe(el));
+    }
+
+    // ---------- 鼠标特效：点阵聚光 + 卡片边框跟随 ----------
+    if (matchMedia("(hover: hover)").matches) {
+      const pointer = document.querySelector(".pointer");
+      const cards = [...document.querySelectorAll(".stat, .race, .how .card, .tile, .step, .ext-demo, .log-item, details, .final, .window")];
+      cards.forEach((el) => el.classList.add("spot"));
+      let mx = 0, my = 0, queued = false;
+      const update = () => {
+        queued = false;
+        pointer.style.setProperty("--mx", `${mx}px`);
+        pointer.style.setProperty("--my", `${my}px`);
+        for (const el of cards) {
+          const r = el.getBoundingClientRect();
+          // 只更新鼠标附近的卡片；离开后把亮光移出卡片
+          if (r.bottom < my - 260 || r.top > my + 260 || r.right < mx - 260 || r.left > mx + 260) {
+            if (el.dataset.lit) { el.style.removeProperty("--x"); el.style.removeProperty("--y"); delete el.dataset.lit; }
+            continue;
+          }
+          el.dataset.lit = "1";
+          el.style.setProperty("--x", `${mx - r.left}px`);
+          el.style.setProperty("--y", `${my - r.top}px`);
+        }
+      };
+      const queue = () => { if (!queued) { queued = true; requestAnimationFrame(update); } };
+      addEventListener("pointermove", (e) => { mx = e.clientX; my = e.clientY; pointer.classList.add("on"); queue(); }, { passive: true });
+      addEventListener("scroll", queue, { passive: true });
+      document.documentElement.addEventListener("pointerleave", () => {
+        pointer.classList.remove("on");
+        mx = my = -9999;
+        queue();
+      });
+    }
 
     // ---------- 最新版本与 Star 数 ----------
     fetch("https://api.github.com/repos/fttawa/NDM/releases/latest")
