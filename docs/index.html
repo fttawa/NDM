@@ -4,28 +4,31 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>NDM — 你的下一代开源高速下载器</title>
-<meta name="description" content="NDM 是基于 Tauri 2 + Rust 的开源多线程下载管理器：多连接分段、动态分段、断点续传、SQLite 持久化、浏览器接管、OpenList 整目录下载。" />
+<meta name="description" content="NDM 是基于 Tauri 2 + Rust 的开源多线程下载管理器：多连接分段、动态分段、连接超频、断点续传、SQLite 持久化、浏览器接管、OpenList 整目录下载。" />
 <meta name="theme-color" content="#0d0d0e" />
 <meta property="og:title" content="NDM — 你的下一代开源高速下载器" />
-<meta property="og:description" content="开源多线程下载管理器，支持 SQLite、备份恢复与浏览器接管。" />
+<meta property="og:description" content="开源多线程下载管理器：多连接加速、动态分段、连接超频、浏览器接管。" />
 <meta property="og:image" content="https://fttawa.github.io/NDM/banner.png" />
 <link rel="icon" href="icon.svg" type="image/svg+xml" />
 <style>
   :root {
     --bg: #0d0d0e;
     --glass: rgba(58, 58, 60, 0.3);
+    --glass-hover: rgba(74, 74, 77, 0.42);
     --glass-strong: rgba(28, 28, 30, 0.72);
     --border: rgba(255, 255, 255, 0.08);
+    --border-2: rgba(255, 255, 255, 0.14);
     --text: #ededed;
     --text-2: #a1a1a1;
     --text-3: #6b6b6b;
     --accent: #d4d4d4;
     --on-accent: #161616;
     --track: rgba(255, 255, 255, 0.08);
+    --success: #8fbf9f;
     color-scheme: dark;
   }
   * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
+  html { scroll-behavior: smooth; scroll-padding-top: 76px; }
   body {
     margin: 0;
     background: var(--bg);
@@ -36,15 +39,17 @@
   }
   a { color: inherit; text-decoration: none; }
   img { max-width: 100%; height: auto; display: block; }
+  button { font: inherit; color: inherit; }
+  code { font-family: "Cascadia Code", Consolas, monospace; font-size: .88em; padding: 2px 6px; border-radius: 6px; background: var(--track); word-break: break-all; }
 
-  /* 背景：几块灰色形状 + 大模糊，形成毛玻璃底 */
+  /* 背景：灰色形状 + 大模糊 + 细颗粒 */
   .bg { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
-  .bg i { position: absolute; border-radius: 50%; filter: blur(110px); }
-  .bg i:nth-child(1) { width: 640px; height: 640px; right: -160px; top: -220px; background: #3c3c40; }
-  .bg i:nth-child(2) { width: 520px; height: 520px; left: -200px; top: 40%; background: #262628; }
-  .bg i:nth-child(3) { width: 460px; height: 460px; right: 10%; bottom: -260px; background: #2e2e31; }
+  .bg i { position: absolute; border-radius: 50%; filter: blur(120px); }
+  .bg i:nth-child(1) { width: 680px; height: 680px; right: -180px; top: -240px; background: #3c3c40; }
+  .bg i:nth-child(2) { width: 560px; height: 560px; left: -220px; top: 38%; background: #252527; }
+  .bg i:nth-child(3) { width: 480px; height: 480px; right: 8%; bottom: -280px; background: #2e2e31; }
   .bg::after {
-    content: ""; position: absolute; inset: 0; opacity: .2; mix-blend-mode: overlay;
+    content: ""; position: absolute; inset: 0; opacity: .18; mix-blend-mode: overlay;
     background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .5  0 0 0 0 .5  0 0 0 0 .5  0 0 0 .9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
   }
 
@@ -57,157 +62,276 @@
   }
 
   /* 导航 */
-  nav {
+  .topnav {
     position: sticky; top: 0; z-index: 10;
-    background: rgba(13, 13, 14, .6);
+    background: rgba(13, 13, 14, .62);
     border-bottom: 1px solid var(--border);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
   }
-  nav .wrap { display: flex; align-items: center; gap: 28px; height: 62px; }
+  .topnav .wrap { display: flex; align-items: center; gap: 28px; height: 62px; }
   .logo { display: flex; align-items: center; gap: 10px; font-weight: 800; letter-spacing: .05em; font-size: 18px; }
   .logo img { width: 30px; height: 30px; }
-  .links { display: flex; gap: 24px; margin-left: auto; font-size: 14px; color: var(--text-2); }
+  .links { display: flex; gap: 22px; margin-left: auto; font-size: 14px; color: var(--text-2); }
   .links a:hover { color: var(--text); }
-  .gh { display: flex; align-items: center; gap: 8px; font-size: 14px; padding: 7px 14px; border-radius: 10px; }
-  .gh:hover { background: var(--track); }
+  .nav-actions { display: flex; align-items: center; gap: 8px; }
+  .gh { display: flex; align-items: center; gap: 8px; font-size: 14px; padding: 7px 12px; border-radius: 10px; color: var(--text-2); }
+  .gh:hover { background: var(--track); color: var(--text); }
   .gh svg { width: 18px; height: 18px; fill: currentColor; }
+  .gh b { font-weight: 600; color: var(--text); }
+  .nav-dl { font-size: 13px; font-weight: 700; padding: 7px 14px; border-radius: 10px; background: var(--accent); color: var(--on-accent); }
+  .nav-dl:hover { background: #e6e6e6; }
 
   .btn {
     display: inline-flex; align-items: center; gap: 10px;
     height: 48px; padding: 0 24px; border-radius: 14px;
-    font-size: 16px; font-weight: 700; transition: background .2s;
+    font-size: 16px; font-weight: 700; transition: background .2s; border: 0; cursor: pointer;
   }
   .btn svg { width: 18px; height: 18px; }
   .btn.primary { background: var(--accent); color: var(--on-accent); }
   .btn.primary:hover { background: #e6e6e6; }
   .btn.ghost { border: 1px solid var(--border); background: var(--glass); }
-  .btn.ghost:hover { background: rgba(74, 74, 77, .46); }
+  .btn.ghost:hover { background: var(--glass-hover); }
+  .btn.small { height: 36px; padding: 0 14px; font-size: 14px; border-radius: 10px; }
 
   /* 首屏 */
-  .hero { padding: 96px 0 56px; text-align: center; }
+  .hero { padding: 92px 0 40px; text-align: center; }
   .badge {
     display: inline-flex; gap: 8px; align-items: center;
     font-size: 13px; color: var(--text-2);
     padding: 5px 14px; border-radius: 99px; margin-bottom: 28px;
   }
   .badge b { color: var(--text); font-weight: 600; }
-  h1 { font-size: clamp(38px, 7vw, 76px); line-height: 1.15; margin: 0; font-weight: 800; letter-spacing: .01em; }
+  .badge:hover { background: var(--glass-hover); }
+  h1 { font-size: clamp(40px, 7vw, 78px); line-height: 1.14; margin: 0; font-weight: 800; letter-spacing: .01em; }
   h1 em { font-style: normal; color: #8f8f8f; }
   .lead { margin: 24px auto 0; max-width: 640px; font-size: 18px; color: var(--text-2); }
   .cta { margin-top: 40px; display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
   .meta { margin-top: 16px; font-size: 13px; color: var(--text-3); }
 
-  .shot {
-    margin: 64px auto 0; padding: 10px; border-radius: 26px;
-    max-width: 1080px;
-  }
-  .shot img { border-radius: 18px; }
+  /* 截图：窗口外框 */
+  .window { margin: 64px auto 0; max-width: 1080px; border-radius: 22px; padding: 8px; }
+  .window-bar { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; }
+  .window-bar i { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,.14); }
+  .window-bar span { margin-left: 8px; font-size: 12px; color: var(--text-3); }
+  .window img { border-radius: 14px; }
+
+  /* 数据条 */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 56px; }
+  .stat { border-radius: 20px; padding: 22px 24px; text-align: left; }
+  .stat b { display: block; font-size: 34px; line-height: 1.1; font-weight: 800; }
+  .stat b small { font-size: 16px; color: var(--text-2); font-weight: 600; margin-left: 4px; }
+  .stat span { font-size: 14px; color: var(--text-2); }
 
   /* 分区 */
-  section { padding: 72px 0; }
+  section { padding: 80px 0; }
   .sec-head { margin-bottom: 36px; }
   .sec-head small { font-size: 13px; color: var(--text-3); letter-spacing: .2em; text-transform: uppercase; }
   h2 { font-size: clamp(28px, 4vw, 40px); margin: 8px 0 0; font-weight: 800; }
-  .sec-head p { margin: 10px 0 0; color: var(--text-2); max-width: 620px; }
+  .sec-head p { margin: 10px 0 0; color: var(--text-2); max-width: 640px; }
+  .sec-head a { text-decoration: underline; text-underline-offset: 3px; }
+
+  /* 速度对比演示 */
+  .race { border-radius: 26px; padding: 28px; }
+  .race-row + .race-row { margin-top: 26px; }
+  .race-top { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+  .race-top h3 { margin: 0; font-size: 17px; }
+  .race-top span { font-size: 13px; color: var(--text-3); }
+  .race-top output { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 15px; color: var(--text-2); }
+  .race-top output.done { color: var(--success); }
+  .segs { display: flex; gap: 3px; height: 16px; }
+  .segs i { flex: 1; min-width: 2px; background: var(--track); border-radius: 4px; overflow: hidden; position: relative; }
+  .segs i b { position: absolute; inset: 0; background: var(--accent); border-radius: 4px; transform-origin: left; transform: scaleX(var(--p, 0)); }
+  .race-row.single .segs i b { background: #8a8a8a; }
+  .race-foot { display: flex; align-items: center; gap: 16px; margin-top: 26px; flex-wrap: wrap; }
+  .race-foot p { margin: 0; font-size: 13px; color: var(--text-3); flex: 1; min-width: 240px; }
+
+  /* 原理三步 */
+  .how { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px; }
+  .how .card { border-radius: 22px; padding: 26px; }
+  .no { font-size: 13px; color: var(--text-3); font-weight: 700; letter-spacing: .1em; }
+  .how h3 { margin: 10px 0 6px; font-size: 18px; }
+  .how p { margin: 0; color: var(--text-2); font-size: 15px; }
 
   /* Bento 网格 */
   .bento { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; }
-  .tile { border-radius: 24px; padding: 28px; min-height: 200px; display: flex; flex-direction: column; }
+  .tile { border-radius: 24px; padding: 28px; min-height: 190px; display: flex; flex-direction: column; transition: background .2s, border-color .2s; }
+  .tile:hover { background: var(--glass-hover); border-color: var(--border-2); }
   .tile h3 { margin: 0; font-size: 20px; }
   .tile p { margin: 8px 0 0; color: var(--text-2); font-size: 15px; }
-  .tile .ic { width: 42px; height: 42px; border-radius: 12px; background: var(--track); display: grid; place-items: center; margin-bottom: 18px; }
-  .tile .ic svg { width: 20px; height: 20px; stroke: var(--accent); fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
-  .s2 { grid-column: span 2; } .s3 { grid-column: span 3; } .s4 { grid-column: span 4; }
-  .big-num { font-size: 64px; font-weight: 800; line-height: 1; margin-top: auto; }
-  .big-num span { font-size: 22px; color: var(--text-2); margin-left: 6px; font-weight: 600; }
-
-  /* 分段示意条 */
-  .segbar { margin-top: auto; padding-top: 24px; }
-  .segs { display: flex; gap: 3px; height: 14px; }
-  .segs i { flex: 1; background: var(--track); border-radius: 3px; overflow: hidden; position: relative; }
-  .segs i b { position: absolute; inset: 0; background: var(--accent); border-radius: 3px; transform-origin: left; transform: scaleX(var(--p)); transition: transform .5s linear; }
-  .seg-legend { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-3); margin-top: 10px; }
+  .ic { width: 42px; height: 42px; border-radius: 12px; background: var(--track); display: grid; place-items: center; margin-bottom: 18px; flex: none; }
+  .ic svg { width: 20px; height: 20px; stroke: var(--accent); fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+  .s2 { grid-column: span 2; } .s3 { grid-column: span 3; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 20px; }
+  .chips span { font-size: 13px; padding: 5px 12px; border-radius: 9px; background: var(--track); color: var(--text-2); }
 
   /* 小卡片示意 */
-  .mini { margin-top: auto; padding: 16px; border-radius: 16px; background: var(--glass-strong); border: 1px solid var(--border); font-size: 13px; }
-  .mini .row { display: flex; align-items: center; gap: 10px; }
-  .mini .f { width: 30px; height: 30px; border-radius: 9px; background: var(--track); }
-  .mini .n { font-weight: 700; font-size: 14px; }
+  .mini { padding: 16px; border-radius: 16px; background: var(--glass-strong); border: 1px solid var(--border); font-size: 13px; }
+  .tile .mini { margin-top: auto; }
+  .tile p + .mini { margin-top: 20px; }
+  .mini .row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .mini .row > div:last-child { min-width: 0; }
+  .mini .f { width: 30px; height: 30px; border-radius: 9px; background: var(--track); flex: none; }
+  .mini .n { font-weight: 700; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mini .d { color: var(--text-3); }
   .mini .bt { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
   .mini .bt span { padding: 5px 12px; border-radius: 9px; background: var(--track); }
   .mini .bt span:last-child { background: var(--accent); color: var(--on-accent); font-weight: 700; }
 
-  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 20px; }
-  .chips span { font-size: 13px; padding: 5px 12px; border-radius: 9px; background: var(--track); color: var(--text-2); }
+  /* 扩展 */
+  .ext { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; }
+  .steps { display: flex; flex-direction: column; gap: 12px; }
+  .step { border-radius: 18px; padding: 18px 22px; display: flex; gap: 16px; }
+  .step .no { padding-top: 2px; }
+  .step h3 { margin: 0 0 4px; font-size: 16px; }
+  .step p { margin: 0; color: var(--text-2); font-size: 14px; }
+  .ext-demo { border-radius: 22px; padding: 24px; display: flex; flex-direction: column; gap: 14px; }
+  .note { font-size: 13px; color: var(--text-2); padding: 12px 14px; border-radius: 12px; background: var(--track); }
+  .note b { color: var(--text); }
 
-  /* 步骤 */
-  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-  .step { border-radius: 22px; padding: 26px; }
-  .step .no { font-size: 13px; color: var(--text-3); font-weight: 700; letter-spacing: .1em; }
-  .step h3 { margin: 10px 0 6px; font-size: 18px; }
-  .step p { margin: 0; color: var(--text-2); font-size: 15px; }
-  code { font-family: "Cascadia Code", Consolas, monospace; font-size: .9em; padding: 2px 6px; border-radius: 6px; background: var(--track); }
+  /* 更新日志 */
+  .log { display: grid; gap: 12px; }
+  .log-item { border-radius: 18px; padding: 20px 24px; display: grid; grid-template-columns: 150px 1fr; gap: 16px; }
+  .log-item .v { font-weight: 800; font-size: 18px; }
+  .log-item .v small { display: block; font-weight: 400; font-size: 13px; color: var(--text-3); }
+  .log-item ul { margin: 0; padding-left: 18px; color: var(--text-2); font-size: 15px; }
+  .log-item li + li { margin-top: 4px; }
+  .latest { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 6px; background: var(--accent); color: var(--on-accent); margin-left: 6px; vertical-align: 3px; }
+
+  /* 常见问题 */
+  .faq { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+  details { border-radius: 16px; padding: 0 22px; }
+  details[open] { background: var(--glass-hover); }
+  summary { cursor: pointer; list-style: none; padding: 18px 0; font-weight: 700; display: flex; align-items: center; gap: 12px; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; margin-left: auto; color: var(--text-3); font-weight: 400; font-size: 20px; line-height: 1; }
+  details[open] summary::after { content: "−"; }
+  details p { margin: 0 0 18px; color: var(--text-2); font-size: 15px; }
 
   /* 底部下载 */
   .final { text-align: center; border-radius: 28px; padding: 64px 24px; }
   .final h2 { margin: 0; }
   .final p { color: var(--text-2); margin: 12px 0 32px; }
 
-  footer { padding: 40px 0 56px; color: var(--text-3); font-size: 13px; }
+  footer { padding: 40px 0 56px; color: var(--text-3); font-size: 13px; border-top: 1px solid var(--border); }
   footer .wrap { display: flex; gap: 16px; flex-wrap: wrap; justify-content: space-between; }
   footer a:hover { color: var(--text); }
+  .fl { display: flex; gap: 18px; }
 
   @media (max-width: 900px) {
     .bento { grid-template-columns: repeat(2, 1fr); }
-    .s2, .s3, .s4 { grid-column: span 2; }
-    .steps { grid-template-columns: 1fr; }
+    .s2, .s3 { grid-column: span 2; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .how, .ext, .faq { grid-template-columns: 1fr; }
     .links { display: none; }
-    .gh { margin-left: auto; }
+    .nav-actions { margin-left: auto; }
   }
   @media (max-width: 600px) {
     .wrap { padding: 0 16px; }
     .hero { padding-top: 64px; }
-    .tile { padding: 22px; }
-    .gh span { display: none; }
+    .tile, .race { padding: 22px; }
+    .gh span, .gh b { display: none; }
+    .log-item { grid-template-columns: 1fr; gap: 8px; }
+    .stat { padding: 18px; }
+    .stat b { font-size: 28px; }
+    section { padding: 64px 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
   }
 </style>
 </head>
 <body>
   <div class="bg" aria-hidden="true"><i></i><i></i><i></i></div>
 
-  <nav>
+  <nav class="topnav">
     <div class="wrap">
       <a class="logo" href="#"><img src="icon.svg" alt="" />NDM</a>
       <div class="links">
+        <a href="#speed">速度</a>
         <a href="#features">特性</a>
         <a href="#extension">浏览器扩展</a>
-        <a href="#start">快速上手</a>
+        <a href="#changelog">更新日志</a>
+        <a href="#faq">常见问题</a>
       </div>
-      <a class="gh" href="https://github.com/fttawa/NDM" target="_blank" rel="noopener">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-        <span>GitHub</span>
-      </a>
+      <div class="nav-actions">
+        <a class="gh" href="https://github.com/fttawa/NDM" target="_blank" rel="noopener">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          <span>GitHub</span><b id="stars"></b>
+        </a>
+        <a class="nav-dl dl-link" href="https://github.com/fttawa/NDM/releases/latest">下载</a>
+      </div>
     </div>
   </nav>
 
   <header class="hero">
     <div class="wrap">
-      <div class="badge glass"><b id="ver">v0.2.4</b> 已发布 · 免费开源</div>
+      <a class="badge glass" href="#changelog"><b class="ver">v0.2.4</b> 已发布 · 查看更新内容</a>
       <h1>你的下一代<br />开源<em>高速</em>下载器</h1>
-      <p class="lead">多连接分段加速、动态分段、断点续传，接管浏览器下载。SQLite 持久化与备份恢复，让任务始终在手边。</p>
+      <p class="lead">多连接分段加速、动态分段与连接超频，接管浏览器下载。基于 Tauri 2 与 Rust，安装包仅约 2 MB，免费、无广告。</p>
       <div class="cta">
-        <a class="btn primary" id="dl" href="https://github.com/fttawa/NDM/releases/latest">
+        <a class="btn primary dl-link" href="https://github.com/fttawa/NDM/releases/latest">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
           下载 Windows 版
         </a>
         <a class="btn ghost" href="https://github.com/fttawa/NDM" target="_blank" rel="noopener">查看源码</a>
       </div>
       <div class="meta" id="dl-meta">Windows 10 / 11 · x64</div>
-      <div class="shot glass"><img src="screenshot.png" alt="NDM 主界面" width="2001" height="1151" /></div>
+
+      <div class="window glass">
+        <div class="window-bar" aria-hidden="true"><i></i><i></i><i></i><span>NDM</span></div>
+        <img src="screenshot.png" alt="NDM 下载管理界面" width="2001" height="1151" />
+      </div>
+
+      <div class="stats">
+        <div class="stat glass"><b>2<small>MB</small></b><span>安装包大小</span></div>
+        <div class="stat glass"><b>32<small>连接</small></b><span>每个任务最多连接数</span></div>
+        <div class="stat glass"><b>+50<small>%</small></b><span>超频最多加开的连接</span></div>
+        <div class="stat glass"><b>0<small>广告</small></b><span>无广告、无追踪</span></div>
+      </div>
     </div>
   </header>
+
+  <section id="speed">
+    <div class="wrap">
+      <div class="sec-head">
+        <small>Speed</small>
+        <h2>为什么更快</h2>
+        <p>很多服务器会限制单个连接的速度。NDM 把文件切成多段同时下载，先下完的连接会去帮剩余最多的那段。</p>
+      </div>
+      <div class="race glass" id="race">
+        <div class="race-row single">
+          <div class="race-top"><h3>浏览器</h3><span>单连接</span><output id="t-single">0.0 秒</output></div>
+          <div class="segs" id="segs-single"></div>
+        </div>
+        <div class="race-row">
+          <div class="race-top"><h3>NDM</h3><span>8 连接 · 动态分段</span><output id="t-ndm">0.0 秒</output></div>
+          <div class="segs" id="segs-ndm"></div>
+        </div>
+        <div class="race-foot">
+          <p>示意演示（4 倍速播放）：假设服务器限制每个连接的速度，且各连接快慢不一。实际速度取决于服务器与网络。</p>
+          <button class="btn ghost small" id="replay" type="button">重新演示</button>
+        </div>
+      </div>
+      <div class="how">
+        <div class="card glass">
+          <div class="no">01 · 分段</div>
+          <h3>多连接并行</h3>
+          <p>先探测文件大小与是否支持断点续传，再切成多段，每段独占一条连接同时下载。</p>
+        </div>
+        <div class="card glass">
+          <div class="no">02 · 动态分段</div>
+          <h3>先完成的去帮忙</h3>
+          <p>某个连接下完自己那段后，自动把剩余最多的分段一分为二接手，跑到最后也不掉速。</p>
+        </div>
+        <div class="card glass">
+          <div class="no">03 · 超频</div>
+          <h3>提前补上连接</h3>
+          <p>实测服务器响应延迟，预判即将空闲或重试中的连接，提前开好新连接填上空档。</p>
+        </div>
+      </div>
+    </div>
+  </section>
 
   <section id="features">
     <div class="wrap">
@@ -217,21 +341,6 @@
         <p>该有的下载器能力一样不少，界面保持安静、克制。</p>
       </div>
       <div class="bento">
-        <div class="tile glass s4">
-          <div class="ic"><svg viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg></div>
-          <h3>多连接分段 + 动态分段</h3>
-          <p>每个任务最多 32 条连接，每段独占一条 TCP 连接。连接空闲时自动拆分剩余最多的分段接手，跑到最后也不掉速。</p>
-          <div class="segbar">
-            <div class="segs" id="segs"></div>
-            <div class="seg-legend"><span>16 个分段</span><span id="seg-pct">0%</span></div>
-          </div>
-        </div>
-        <div class="tile glass s2">
-          <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 14l4-4"/><path d="M3.3 19a10 10 0 1 1 17.4 0"/></svg></div>
-          <h3>连接超频</h3>
-          <p>实测请求延迟，预判即将传完或重试中的连接，提前补上新连接，防止掉速。</p>
-          <div class="big-num">+50%<span>连接</span></div>
-        </div>
         <div class="tile glass s3">
           <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18"/></svg></div>
           <h3>IDM 式确认小卡片</h3>
@@ -244,20 +353,20 @@
         <div class="tile glass s3">
           <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 20h16a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-8l-2-3H4a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1z"/><path d="M12 10v6M9 13l3 3 3-3"/></svg></div>
           <h3>OpenList 整目录下载</h3>
-          <p>在 OpenList / AList 页面一键爬取当前文件夹（可含子文件夹），勾选后批量下载，保留目录结构与真实文件名，支持登录身份与加密文件夹。</p>
+          <p>在 OpenList / AList 页面一键读取当前文件夹（可含子文件夹），勾选后批量下载，保留目录结构与真实文件名，支持登录身份与加密文件夹。</p>
           <div class="chips"><span>递归子文件夹</span><span>保留结构</span><span>文件夹密码</span></div>
         </div>
-        <div class="tile glass s3">
+        <div class="tile glass s2">
           <div class="ic"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></div>
           <h3>断点续传</h3>
-          <p>分段进度持久化，崩溃或重启后从断点继续；服务器不支持 Range 时自动降级为单连接。</p>
+          <p>分段进度持久保存，崩溃或重启后从断点继续；续传前会确认服务器上的文件没有变化。</p>
         </div>
-        <div class="tile glass s3">
+        <div class="tile glass s2">
           <div class="ic"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v7c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12v7c0 1.7 3.6 3 8 3s8-1.3 8-3v-7"/></svg></div>
-          <h3>SQLite 持久化与备份</h3>
-          <p>任务和设置保存在 SQLite，旧版 JSON 自动迁移；支持导入导出，数据库损坏时自动备份并恢复。</p>
+          <h3>SQLite 与备份恢复</h3>
+          <p>任务和设置存于 SQLite，可导出、导入备份；数据库损坏时自动保留副本后重建。</p>
         </div>
-        <div class="tile glass s3">
+        <div class="tile glass s2">
           <div class="ic"><svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
           <h3>批量管理</h3>
           <p>复选框多选，Shift 连选、Ctrl+A 全选，批量开始、暂停、重新下载与删除。</p>
@@ -265,12 +374,14 @@
         <div class="tile glass s3">
           <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></div>
           <h3>网络与代理</h3>
-          <p>全局限速、并发队列，系统代理或手动 HTTP / SOCKS5 代理。</p>
+          <p>全局限速、并发队列，跟随系统代理或手动设置 HTTP / SOCKS5 代理，可一键测试。</p>
+          <div class="chips"><span>限速</span><span>并发队列</span><span>HTTP / SOCKS5</span></div>
         </div>
         <div class="tile glass s3">
           <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg></div>
           <h3>安静的界面</h3>
-          <p>Bento Grid 布局，深色毛玻璃，亚克力 / 云母窗口材质；托盘、通知、剪贴板监听。</p>
+          <p>Bento Grid 布局，深色毛玻璃，亚克力 / 云母窗口材质；托盘、完成通知、剪贴板监听、检查更新。</p>
+          <div class="chips"><span>亚克力</span><span>云母</span><span>托盘</span><span>检查更新</span></div>
         </div>
       </div>
     </div>
@@ -283,33 +394,115 @@
         <h2>接管浏览器下载</h2>
         <p>Chrome / Edge 扩展在「另存为」弹出前拦截下载，连同 Cookie、Referer、User-Agent 一起交给 NDM；NDM 没运行时自动交还浏览器。</p>
       </div>
-      <div class="steps">
-        <div class="step glass">
-          <div class="no">01</div>
-          <h3>打开扩展目录</h3>
-          <p>安装 NDM 后，在「设置 → 浏览器集成」打开随安装包附带的扩展目录。</p>
+      <div class="ext">
+        <div class="steps">
+          <div class="step glass">
+            <div class="no">01</div>
+            <div><h3>打开扩展目录</h3><p>安装 NDM 后，在「设置 → 浏览器集成」打开随安装包附带的扩展目录。</p></div>
+          </div>
+          <div class="step glass">
+            <div class="no">02</div>
+            <div><h3>加载扩展</h3><p>访问 <code>edge://extensions</code> 或 <code>chrome://extensions</code>，开启开发者模式，「加载已解压的扩展程序」。</p></div>
+          </div>
+          <div class="step glass">
+            <div class="no">03</div>
+            <div><h3>照常下载</h3><p>点击下载链接即弹出确认卡片；右键链接或在 OpenList 页面也能直接交给 NDM。</p></div>
+          </div>
         </div>
-        <div class="step glass">
-          <div class="no">02</div>
-          <h3>加载扩展</h3>
-          <p>访问 <code>edge://extensions</code> 或 <code>chrome://extensions</code>，开启开发者模式，「加载已解压的扩展程序」。</p>
-        </div>
-        <div class="step glass">
-          <div class="no">03</div>
-          <h3>照常下载</h3>
-          <p>点击下载链接即弹出确认卡片；右键链接或在 OpenList 页面也能直接交给 NDM。</p>
+        <div class="ext-demo glass">
+          <div class="mini">
+            <div class="row"><div class="f"></div><div><div class="n">ubuntu-24.04.3-desktop-amd64.iso</div><div class="d">6.0 GB · releases.ubuntu.com</div></div></div>
+            <div class="bt"><span>稍后下载</span><span>开始下载</span></div>
+          </div>
+          <div class="note"><b>安全：</b>扩展接口只监听本机 <code>127.0.0.1</code>，并要求每次启动随机生成的口令，普通网页无法向 NDM 添加任务。</div>
+          <div class="note"><b>升级提示：</b>从 v0.2.1 及更早版本升级后，请在扩展页对「NDM 下载助手」点一次「重新加载」。</div>
         </div>
       </div>
     </div>
   </section>
 
-  <section id="start">
+  <section id="changelog">
+    <div class="wrap">
+      <div class="sec-head">
+        <small>Changelog</small>
+        <h2>更新日志</h2>
+        <p>完整记录见 <a href="https://github.com/fttawa/NDM/releases" target="_blank" rel="noopener">GitHub Releases</a>。</p>
+      </div>
+      <div class="log">
+        <div class="log-item glass">
+          <div class="v">v0.2.4<span class="latest">最新</span><small>2026-10-26</small></div>
+          <ul><li>侧边栏精简为首页、下载、设置三项</li><li>独立的下载管理页，按状态筛选任务</li></ul>
+        </div>
+        <div class="log-item glass">
+          <div class="v">v0.2.3<small>2026-10-25</small></div>
+          <ul><li>增强备份恢复：导入前预览变更，并自动备份当前数据</li><li>导出诊断信息（只含状态与数字，不含链接和文件名）</li><li>设置页检查更新</li></ul>
+        </div>
+        <div class="log-item glass">
+          <div class="v">v0.2.2<small>2026-10-25</small></div>
+          <ul><li>任务与设置迁移到 SQLite，旧版 JSON 自动迁移</li><li>数据库完整性检查，损坏时自动备份重建</li><li>浏览器扩展接口增加随机口令鉴权</li><li>修复并发、续传与文件名冲突等稳定性问题</li></ul>
+        </div>
+        <div class="log-item glass">
+          <div class="v">v0.2.1<small>2026-10-25</small></div>
+          <ul><li>连接超频：按实测延迟提前补连接，最多加开一半</li><li>显示超频连接数与请求延迟</li></ul>
+        </div>
+        <div class="log-item glass">
+          <div class="v">v0.2.0<small>2026-10-24</small></div>
+          <ul><li>首个公开版本：多连接分段、动态分段、断点续传、浏览器扩展、OpenList 整目录下载</li></ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="wrap">
+      <div class="sec-head">
+        <small>FAQ</small>
+        <h2>常见问题</h2>
+      </div>
+      <div class="faq">
+        <details class="glass">
+          <summary>NDM 收费吗？</summary>
+          <p>不收费，源码公开在 GitHub，没有广告和追踪。</p>
+        </details>
+        <details class="glass">
+          <summary>支持哪些系统？</summary>
+          <p>目前支持 Windows 10 / 11（x64）。需要系统自带的 WebView2，Windows 11 和更新过的 Windows 10 一般都已安装。</p>
+        </details>
+        <details class="glass">
+          <summary>安装时 Windows 提示「已保护你的电脑」？</summary>
+          <p>安装包暂未做代码签名，SmartScreen 会提示未知发布者。点「更多信息」→「仍要运行」即可；也可以从源码自行构建。</p>
+        </details>
+        <details class="glass">
+          <summary>为什么扩展要用「加载已解压」安装？</summary>
+          <p>扩展还没有上架 Chrome / Edge 商店，暂时需要在开发者模式下加载安装包附带的扩展目录。</p>
+        </details>
+        <details class="glass">
+          <summary>升级后浏览器不再拦截下载了？</summary>
+          <p>v0.2.2 起扩展接口需要口令鉴权。从更早版本升级后，请在扩展页对「NDM 下载助手」点「重新加载」，或重启浏览器。</p>
+        </details>
+        <details class="glass">
+          <summary>数据保存在哪里？怎么备份？</summary>
+          <p>任务和设置保存在 <code>%APPDATA%\com.ndm.app\state.db</code>。在「设置」中可以导出为 JSON 备份，换电脑后再导入。</p>
+        </details>
+        <details class="glass">
+          <summary>所有网站都能加速吗？</summary>
+          <p>服务器需要支持断点续传（Range 请求）才能分段加速；不支持时 NDM 会自动改为单连接下载。</p>
+        </details>
+        <details class="glass">
+          <summary>超频会给服务器造成负担吗？</summary>
+          <p>超频连接只在原有连接即将空闲或正在重试时临时补上，最多加开连接数的一半，补上后多出的连接会自动退出。也可以在设置里关闭。</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section style="padding-top:0">
     <div class="wrap">
       <div class="final glass">
         <h2>现在就试试 NDM</h2>
         <p>免费、开源、无广告。</p>
         <div class="cta" style="margin-top:0">
-          <a class="btn primary" id="dl2" href="https://github.com/fttawa/NDM/releases/latest">
+          <a class="btn primary dl-link" href="https://github.com/fttawa/NDM/releases/latest">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
             下载 Windows 版
           </a>
@@ -322,39 +515,91 @@
   <footer>
     <div class="wrap">
       <span>NDM · 基于 Tauri 2 与 Rust</span>
-      <span><a href="https://github.com/fttawa/NDM" target="_blank" rel="noopener">GitHub</a> · <a href="https://github.com/fttawa/NDM/issues" target="_blank" rel="noopener">反馈问题</a></span>
+      <span class="fl">
+        <a href="https://github.com/fttawa/NDM" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/fttawa/NDM/releases" target="_blank" rel="noopener">版本</a>
+        <a href="https://github.com/fttawa/NDM/issues" target="_blank" rel="noopener">反馈问题</a>
+      </span>
     </div>
   </footer>
 
   <script>
-    // 分段示意：各分段以不同速度推进，到头后重新开始
-    const segs = document.getElementById("segs");
-    const pctEl = document.getElementById("seg-pct");
-    const N = 16;
-    const speed = Array.from({ length: N }, () => 0.02 + Math.random() * 0.05);
-    let prog = new Array(N).fill(0);
-    segs.innerHTML = "<i><b></b></i>".repeat(N);
-    const fills = [...segs.querySelectorAll("b")];
+    // ---------- 速度对比演示 ----------
+    // 假设服务器限制每个连接约 1 份/秒；NDM 的 8 个连接快慢不一，先下完的接手剩余最多的分段
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    function tick() {
-      if (prog.every((p) => p >= 1)) prog = prog.map(() => 0);
-      else prog = prog.map((p, i) => Math.min(1, p + speed[i]));
-      fills.forEach((f, i) => f.style.setProperty("--p", prog[i]));
-      pctEl.textContent = Math.round((prog.reduce((a, b) => a + b, 0) / N) * 100) + "%";
-    }
-    if (reduce) { prog = prog.map(() => 0.6); tick(); } else { tick(); setInterval(tick, 500); }
+    const SIZE = 64;
+    const RATES = [1.2, 0.7, 1.0, 1.4, 0.8, 1.1, 0.6, 1.3];
+    const singleEl = document.getElementById("segs-single");
+    const ndmEl = document.getElementById("segs-ndm");
+    const tSingle = document.getElementById("t-single");
+    const tNdm = document.getElementById("t-ndm");
+    singleEl.innerHTML = "<i><b></b></i>";
+    const singleFill = singleEl.querySelector("b");
+    let timer = null;
 
-    // 读取最新版本，下载按钮直达安装包
+    function run() {
+      clearInterval(timer);
+      const segs = RATES.map((rate, i) => ({ start: i * 8, end: i * 8 + 8, pos: i * 8, rate }));
+      let single = 0, t = 0, doneSingle = false, doneNdm = false;
+      for (const o of [tSingle, tNdm]) o.classList.remove("done");
+      const draw = () => {
+        ndmEl.innerHTML = segs
+          .map((s) => `<i style="flex:${s.end - s.start}"><b style="--p:${((s.pos - s.start) / (s.end - s.start)).toFixed(4)}"></b></i>`)
+          .join("");
+        singleFill.style.setProperty("--p", single / SIZE);
+      };
+      const step = (dt) => {
+        t += dt;
+        if (!doneSingle) {
+          single = Math.min(SIZE, single + dt);
+          tSingle.textContent = `${t.toFixed(1)} 秒`;
+          if (single >= SIZE) { doneSingle = true; tSingle.classList.add("done"); tSingle.textContent += " · 完成"; }
+        }
+        if (!doneNdm) {
+          for (const s of segs) s.pos = Math.min(s.end, s.pos + dt * s.rate);
+          // 动态分段：空闲连接把剩余最多的分段一分为二，接手后半段
+          for (const idle of segs.filter((s) => s.pos >= s.end && s.rate > 0)) {
+            const big = segs.filter((s) => s.pos < s.end).sort((a, b) => b.end - b.pos - (a.end - a.pos))[0];
+            idle.rate = idle.rate && big && big.end - big.pos >= 1 ? (() => {
+              const mid = big.pos + (big.end - big.pos) / 2;
+              segs.push({ start: mid, end: big.end, pos: mid, rate: idle.rate });
+              big.end = mid;
+              return 0;
+            })() : 0;
+          }
+          segs.sort((a, b) => a.start - b.start);
+          tNdm.textContent = `${t.toFixed(1)} 秒`;
+          if (segs.every((s) => s.pos >= s.end)) { doneNdm = true; tNdm.classList.add("done"); tNdm.textContent += " · 完成"; }
+        }
+        draw();
+        return doneSingle && doneNdm;
+      };
+      if (reduce) { while (!step(0.5)); return; }
+      draw();
+      timer = setInterval(() => { if (step(0.4)) clearInterval(timer); }, 100);
+    }
+    document.getElementById("replay").addEventListener("click", run);
+    new IntersectionObserver((entries, obs) => {
+      if (entries[0].isIntersecting) { run(); obs.disconnect(); }
+    }, { threshold: 0.4 }).observe(document.getElementById("race"));
+
+    // ---------- 最新版本与 Star 数 ----------
     fetch("https://api.github.com/repos/fttawa/NDM/releases/latest")
       .then((r) => (r.ok ? r.json() : null))
       .then((rel) => {
         if (!rel) return;
-        document.getElementById("ver").textContent = rel.tag_name;
+        document.querySelectorAll(".ver").forEach((el) => (el.textContent = rel.tag_name));
         const exe = (rel.assets || []).find((a) => /setup\.exe$/i.test(a.name));
         if (!exe) return;
-        for (const id of ["dl", "dl2"]) document.getElementById(id).href = exe.browser_download_url;
+        document.querySelectorAll(".dl-link").forEach((a) => (a.href = exe.browser_download_url));
         document.getElementById("dl-meta").textContent =
           `${rel.tag_name} · Windows 10 / 11 · x64 · ${(exe.size / 1048576).toFixed(1)} MB`;
+      })
+      .catch(() => {});
+    fetch("https://api.github.com/repos/fttawa/NDM")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((repo) => {
+        if (repo && repo.stargazers_count > 0) document.getElementById("stars").textContent = repo.stargazers_count;
       })
       .catch(() => {});
   </script>
