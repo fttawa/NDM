@@ -3,6 +3,7 @@ mod capture;
 mod commands;
 mod diagnostics;
 mod engine;
+mod hls;
 mod limiter;
 mod manager;
 mod model;
@@ -119,6 +120,7 @@ pub fn run() {
             commands::get_settings,
             commands::set_settings,
             commands::add_tasks,
+            commands::inspect_hls,
             commands::pause_tasks,
             commands::resume_tasks,
             commands::remove_tasks,

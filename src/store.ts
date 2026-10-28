@@ -8,6 +8,7 @@ export interface AddPrefill {
   headers?: [string, string][];
   fileSize?: number;
   referrer?: string;
+  hls?: boolean;
 }
 
 export type Filter = "all" | "active" | "waiting" | "completed" | "paused" | "error";

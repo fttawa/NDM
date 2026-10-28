@@ -67,6 +67,8 @@ struct Capture {
     cookies: Option<String>,
     user_agent: Option<String>,
     file_size: Option<i64>,
+    #[serde(default)]
+    hls: bool,
 }
 
 /// 扩展发来的批量下载（如 OpenList 当前文件夹的文件清单）
@@ -118,6 +120,7 @@ pub struct CapturePayload {
     pub headers: Vec<(String, String)>,
     pub file_size: Option<u64>,
     pub referrer: Option<String>,
+    pub hls: bool,
 }
 
 impl Bridge {
@@ -350,6 +353,7 @@ fn accept(mgr: &Arc<Manager>, cap: Capture) -> Result<(), String> {
             headers,
             file_size: cap.file_size.filter(|s| *s > 0).map(|s| s as u64),
             referrer,
+            hls: cap.hls,
         };
         crate::capture::open(&mgr.app, payload)?;
     } else {
@@ -362,6 +366,7 @@ fn accept(mgr: &Arc<Manager>, cap: Capture) -> Result<(), String> {
                 connections: None,
                 start: true,
                 headers,
+                hls: cap.hls,
             },
         )?;
     }

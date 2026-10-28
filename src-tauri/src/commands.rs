@@ -167,6 +167,8 @@ pub struct AddArgs {
     start: Option<bool>,
     #[serde(default)]
     headers: Vec<(String, String)>,
+    #[serde(default)]
+    hls: bool,
 }
 
 #[tauri::command]
@@ -180,8 +182,20 @@ pub fn add_tasks(m: M, urls: Vec<String>, options: AddArgs) -> Result<Vec<Task>,
             connections: options.connections,
             start: options.start.unwrap_or(true),
             headers: options.headers,
+            hls: options.hls,
         },
     )
+}
+
+#[tauri::command]
+pub async fn inspect_hls(
+    m: M<'_>,
+    url: String,
+    headers: Vec<(String, String)>,
+) -> Result<crate::hls::Info, String> {
+    crate::hls::inspect(&m.client(), &url, &headers)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

@@ -30,7 +30,9 @@ jobs:
         run: pnpm build
 
       - name: Extension tests
-        run: node extension/rules.test.mjs
+        run: |
+          node extension/rules.test.mjs
+          node --test extension/media.test.mjs extension/sniffer.test.mjs
 
       - name: Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml

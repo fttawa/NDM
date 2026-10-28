@@ -36,6 +36,7 @@ pub struct AddOptions {
     pub connections: Option<u32>,
     pub start: bool,
     pub headers: Vec<(String, String)>,
+    pub hls: bool,
 }
 
 /// 按设置构建 HTTP 客户端；自定义代理地址无效时返回错误
@@ -530,6 +531,7 @@ impl Manager {
         let mut batch_names = std::collections::HashSet::new();
         let mut tasks = self.tasks.lock();
         for (url, custom) in pairs {
+            let hls = opts.hls || crate::hls::is_hls_url(&url);
             let (file_name, locked) = match custom {
                 Some(n) => (n, true),
                 None => (
@@ -553,6 +555,7 @@ impl Manager {
             };
             created.push(Task {
                 id: uuid::Uuid::new_v4().to_string(),
+                hls,
                 url,
                 file_name,
                 name_locked: locked,
@@ -567,7 +570,7 @@ impl Manager {
                 resumable: false,
                 force_single: false,
                 segments: Vec::new(),
-                connections: conns,
+                connections: if hls { 1 } else { conns },
                 created_at: now_ms(),
                 finished_at: None,
                 error: None,

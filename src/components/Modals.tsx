@@ -1,6 +1,6 @@
 import { FolderOpen, Globe, Link2, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, pickDirectory } from "../lib/api";
+import { api, pickDirectory, type HlsInfo } from "../lib/api";
 import { bytes, extractUrls } from "../lib/format";
 import { useStore } from "../store";
 import { Slider, Switch } from "./ui";
@@ -41,6 +41,12 @@ export function AddTaskModal() {
   const [conns, setConns] = useState(8);
   const [start, setStart] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [hls, setHls] = useState(false);
+  const [hlsInfo, setHlsInfo] = useState<HlsInfo | null>(null);
+  const [hlsVariant, setHlsVariant] = useState("");
+  const [hlsError, setHlsError] = useState("");
+  const [inspecting, setInspecting] = useState(false);
+  const inspectSequence = useRef(0);
   const ref = useRef<HTMLTextAreaElement>(null);
   const startRef = useRef<HTMLButtonElement>(null);
   // 来自浏览器扩展的下载：带请求头，弹窗以确认为主
@@ -55,23 +61,46 @@ export function AddTaskModal() {
       setName(prefill.fileName ?? "");
       setConns(s?.connections ?? 8);
       setStart(true);
+      setHls(!!prefill.hls);
       // 拦截的下载直接聚焦「开始下载」，按回车即可确认
       setTimeout(() => (prefill.headers ? startRef.current : ref.current)?.focus(), 30);
     }
   }, [open, prefill]);
 
   const urls = useMemo(() => extractUrls(text), [text]);
+  const autoHls = urls.length === 1 && (() => { try { return new URL(urls[0]).pathname.toLowerCase().endsWith(".m3u8"); } catch { return false; } })();
+  const hlsMode = urls.length === 1 && (hls || autoHls);
+
+  useEffect(() => {
+    inspectSequence.current++;
+    setHlsInfo(null); setHlsVariant(""); setHlsError(""); setInspecting(false);
+  }, [text, hls, open, prefill]);
+
+  const inspect = async () => {
+    const sequence = ++inspectSequence.current;
+    setInspecting(true); setHlsError(""); setHlsInfo(null); setHlsVariant("");
+    try {
+      const info = await api.inspectHls(urls[0], prefill.headers);
+      if (sequence === inspectSequence.current) setHlsInfo(info);
+    } catch (error) { if (sequence === inspectSequence.current) setHlsError(String(error)); }
+    finally { if (sequence === inspectSequence.current) setInspecting(false); }
+  };
 
   const submit = async () => {
-    if (!urls.length) return;
+    if (!urls.length || busy || inspecting) return;
     setBusy(true);
     try {
-      await api.addTasks(urls, {
+      const target = hlsMode && hlsVariant ? hlsVariant : urls[0];
+      const headers = hlsMode && new URL(target).origin !== new URL(urls[0]).origin
+        ? prefill.headers?.filter(([name]) => !["cookie", "authorization", "origin"].includes(name.toLowerCase()))
+        : prefill.headers;
+      await api.addTasks(hlsMode ? [target] : urls, {
         saveDir: dir,
         fileName: urls.length === 1 ? name : undefined,
         connections: conns,
         start,
-        headers: prefill.headers,
+        headers,
+        hls: hlsMode,
       });
       useStore.getState().openDownloads();
       showToast(`已添加 ${urls.length} 个任务`);
@@ -115,6 +144,20 @@ export function AddTaskModal() {
         <div className="field-hint">{urls.length ? `识别到 ${urls.length} 个链接` : "未识别到链接"}</div>
       </div>
 
+      {urls.length === 1 && <div className="field hls-options">
+        <label className="set-row"><span>HLS / m3u8 视频</span>{autoHls ? <span className="pill">已识别</span> : <Switch checked={hlsMode} onChange={setHls} />}</label>
+        {hlsMode && <>
+          <div className="set-row"><span className="muted small">默认选择最高可用清晰度</span><button className="btn glass" disabled={inspecting || busy} onClick={inspect}>{inspecting ? "解析中…" : "解析清晰度"}</button></div>
+          {hlsError && <p className="err small" role="alert">{hlsError}</p>}
+          {!!hlsInfo?.variants.length && <select className="input" aria-label="视频清晰度" value={hlsVariant} onChange={event => setHlsVariant(event.target.value)}>
+            <option value="">自动选择最高可用清晰度</option>
+            {hlsInfo.variants.map((variant, index) => <option key={`${index}-${variant.url}`} value={variant.url} disabled={!variant.supported}>{variant.label}</option>)}
+          </select>}
+          {hlsInfo && !hlsInfo.variants.length && <span className="muted small">{hlsInfo.segments} 个分片 · {Math.round(hlsInfo.duration)} 秒 · 保存为 {hlsInfo.format?.toUpperCase()}</span>}
+          <p className="muted small">支持未加密点播流，按顺序合并为 TS 或 MP4。暂停后重新开始；直播、加密与独立音视频轨暂不支持。</p>
+        </>}
+      </div>}
+
       <div className="field-grid">
         <div className="field span-2">
           <label>保存到</label>
@@ -137,12 +180,12 @@ export function AddTaskModal() {
             <input className="input" placeholder="留空则自动识别" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
         )}
-        <div className="field">
+        {!hlsMode && <div className="field">
           <label>
             连接数 <b>{conns}</b>
           </label>
           <Slider value={conns} min={1} max={32} onChange={setConns} />
-        </div>
+        </div>}
         <div className="field row">
           <label>立即开始</label>
           <Switch checked={start} onChange={setStart} />
@@ -154,7 +197,7 @@ export function AddTaskModal() {
         <button className="btn glass" onClick={close}>
           取消
         </button>
-        <button ref={startRef} className="btn primary" disabled={!urls.length || busy} onClick={submit}>
+        <button ref={startRef} className="btn primary" disabled={!urls.length || busy || inspecting} onClick={submit}>
           开始下载
         </button>
       </div>

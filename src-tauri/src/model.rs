@@ -38,6 +38,8 @@ pub struct Task {
     #[serde(default)]
     pub force_single: bool,
     #[serde(default)]
+    pub hls: bool,
+    #[serde(default)]
     pub segments: Vec<Segment>,
     pub connections: u32,
     pub created_at: u64,

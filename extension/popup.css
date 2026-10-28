@@ -12,7 +12,7 @@
   box-sizing: border-box;
 }
 body {
-  width: 300px;
+  width: 340px;
   margin: 0;
   padding: 14px;
   background: var(--bg);
@@ -164,3 +164,11 @@ textarea:focus {
 .ol-msg.err {
   color: #e08a8a;
 }
+.media-heading { display: flex; align-items: center; justify-content: space-between; }
+.media-list { max-height: 220px; overflow-y: auto; }
+.media-item { display: flex; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.media-label { flex: 1; min-width: 0; }
+.media-label span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-label small { color: var(--text-2); }
+.media-item button, .media-refresh { border: 0; border-radius: 6px; background: rgba(255,255,255,.08); color: var(--text); padding: 5px 8px; cursor: pointer; }
+.media-item button:disabled, .media-refresh:disabled { opacity: .5; }

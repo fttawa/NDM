@@ -960,6 +960,8 @@ button {
 }
 
 /* ============ 弹窗 ============ */
+.hls-options { padding: 12px; border: 1px solid var(--line); border-radius: 12px; }
+.hls-options p { margin: 6px 0 0; }
 .modal-mask {
   position: fixed;
   inset: 0;
@@ -975,6 +977,8 @@ button {
   }
 }
 .modal {
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
   max-width: calc(100vw - 40px);
   border-radius: 26px;
   padding: 22px;

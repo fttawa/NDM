@@ -165,6 +165,7 @@ function TaskCardInner({ task }: { task: Task }) {
             {task.fileName}
           </div>
           <div className="sub">
+            {task.hls && <span className="pill">HLS</span>}
             {task.status === "completed" ? (
               bytes(task.total)
             ) : (
@@ -192,7 +193,7 @@ function TaskCardInner({ task }: { task: Task }) {
             </>
           )}
           {task.status === "waiting" && <span>排队等待中…</span>}
-          {task.status === "paused" && <span>{task.resumable ? "可断点续传" : "不支持续传，将重新下载"}</span>}
+          {task.status === "paused" && <span>{task.hls ? "HLS · 继续时从头下载" : task.resumable ? "可断点续传" : "不支持续传，将重新下载"}</span>}
           {task.status === "error" && <span className="err" title={task.error ?? ""}>{task.error}</span>}
           {task.status === "completed" && <span>保存于 {task.saveDir}</span>}
         </div>

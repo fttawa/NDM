@@ -60,3 +60,38 @@ async function setupOpenList() {
 load();
 refreshStatus();
 setupOpenList();
+
+async function refreshMedia() {
+  const list = $("mediaList");
+  const message = $("mediaMsg");
+  $("mediaRefresh").disabled = true;
+  message.textContent = "正在读取…";
+  list.replaceChildren();
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const items = tab?.id ? await chrome.runtime.sendMessage({ type: "media-list", tabId: tab.id }) : [];
+    if (!Array.isArray(items)) throw new Error(items?.error || "读取失败");
+    message.textContent = items.length ? `${items.length} 个资源 · HLS 默认选择最高可用清晰度` : "播放视频后刷新列表；暂不支持 blob、直播和加密 HLS";
+    for (const item of items) {
+      const row = document.createElement("div"); row.className = "media-item";
+      const label = document.createElement("div"); label.className = "media-label";
+      const name = document.createElement("span"); name.textContent = item.name; name.title = item.url;
+      const meta = document.createElement("small"); meta.textContent = `${item.hls ? "HLS" : "视频"} · ${item.host}`;
+      label.append(name, meta);
+      const button = document.createElement("button"); button.textContent = "下载";
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          const result = await chrome.runtime.sendMessage({ type: "media-download", tabId: tab.id, url: item.url });
+          if (!result?.ok) throw new Error(result?.error || "转交失败");
+          button.textContent = "已发送";
+        } catch (error) { message.textContent = error.message; button.disabled = false; }
+      });
+      row.append(label, button); list.append(row);
+    }
+  } catch (error) { message.textContent = error.message || "读取失败"; }
+  finally { $("mediaRefresh").disabled = false; }
+}
+$("mediaRefresh").addEventListener("click", refreshMedia);
+$("videoSniff").addEventListener("change", () => setTimeout(refreshMedia, 100));
+refreshMedia();

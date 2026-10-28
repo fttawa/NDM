@@ -75,6 +75,7 @@ export function CaptureCard({ id }: { id: string }) {
         fileName: nameEdited || cap.fileName ? name : undefined,
         start,
         headers: cap.headers,
+        hls: cap.hls,
       });
       if (start && created) {
         // 原地展开成进度窗口
@@ -125,7 +126,7 @@ export function CaptureCard({ id }: { id: string }) {
             }}
           />
           <div className="cap-meta" data-tauri-drag-region>
-            <span>{cap.fileSize ? bytes(cap.fileSize) : "大小未知"}</span>
+            <span>{cap.hls || /\.m3u8(?:\?|$)/i.test(cap.url) ? "HLS · 自动清晰度 · 暂停后重下" : cap.fileSize ? bytes(cap.fileSize) : "大小未知"}</span>
             <span>{hostOf(cap.referrer) || hostOf(cap.url)}</span>
           </div>
         </div>

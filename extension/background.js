@@ -2,6 +2,7 @@
 
 import { crawlOpenList, detectOpenList } from "./openlist.js";
 import { DEFAULTS, shouldIntercept } from "./rules.js";
+import { setupSniffer } from "./sniffer.js";
 
 /** NDM 接入地址；端口可通过 chrome.storage.local 的 ndmPort 修改（开发测试用），默认 16800 */
 async function ndmBase() {
@@ -33,7 +34,7 @@ async function cookiesFor(url) {
   }
 }
 
-async function sendToNdm({ url, referrer, filename, fileSize }) {
+async function sendToNdm({ url, referrer, filename, fileSize, hls = false }) {
   const alive = await ping();
   if (!alive?.token) throw new Error("NDM 未授权");
   const body = {
@@ -43,6 +44,7 @@ async function sendToNdm({ url, referrer, filename, fileSize }) {
     fileSize: fileSize > 0 ? fileSize : null,
     cookies: await cookiesFor(url),
     userAgent: navigator.userAgent,
+    hls,
   };
   const r = await fetch(`${await ndmBase()}/add`, {
     method: "POST",
@@ -196,7 +198,12 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 });
 
 // 弹出面板查询连接状态
+const handleMedia = setupSniffer({ getConfig, sendToNdm, runInPage });
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
+  if (msg?.type === "media-list" || msg?.type === "media-download") {
+    handleMedia(msg).then(reply).catch(error => reply({ error: error.message || "视频资源操作失败" }));
+    return true;
+  }
   if (msg?.type === "openlist-detect") {
     detectInTab(msg.tabId).then(reply);
     return true;

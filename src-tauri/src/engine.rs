@@ -463,6 +463,9 @@ fn plan_segments(total: u64, conns: u32) -> Vec<Segment> {
 
 /// 下载入口：分段模式失败于 NoRange 时自动降级为单连接
 pub async fn run(mgr: Arc<Manager>, id: String, rt: Arc<ActiveRt>) -> Result<(), DlError> {
+    if mgr.task(&id).is_some_and(|task| task.hls) {
+        return crate::hls::run(&mgr, &id, &rt).await;
+    }
     loop {
         match run_once(&mgr, &id, &rt).await {
             Err(DlError::NoRange) => {
@@ -554,7 +557,7 @@ async fn run_once(mgr: &Arc<Manager>, id: &str, rt: &Arc<ActiveRt>) -> Result<()
     finalize(mgr, id, &dir, &part, &task.file_name)
 }
 
-fn finalize(
+pub(crate) fn finalize(
     mgr: &Arc<Manager>,
     id: &str,
     dir: &Path,

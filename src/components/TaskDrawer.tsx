@@ -83,7 +83,7 @@ export function TaskDrawer() {
               <dt>保存位置</dt>
               <dd className="mono">{task.saveDir}</dd>
               <dt>断点续传</dt>
-              <dd>{task.total == null ? "未知" : task.resumable ? "支持" : "不支持"}</dd>
+              <dd>{task.hls ? "HLS · 暂停后从头下载" : task.total == null ? "未知" : task.resumable ? "支持" : "不支持"}</dd>
               {task.status === "active" && task.latencyMs > 0 && (
                 <>
                   <dt>请求延迟</dt>

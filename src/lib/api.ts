@@ -13,6 +13,7 @@ export interface Task {
   url: string;
   fileName: string;
   nameLocked: boolean;
+  hls?: boolean;
   saveDir: string;
   total: number | null;
   downloaded: number;
@@ -69,6 +70,7 @@ export interface CapturePayload {
   headers: [string, string][];
   fileSize: number | null;
   referrer: string | null;
+  hls?: boolean;
 }
 
 /** 批量下载（如 OpenList 当前文件夹） */
@@ -96,6 +98,13 @@ export interface ImportPreview {
   settingsChanges: (keyof Settings)[];
 }
 
+export interface HlsInfo {
+  variants: { url: string; label: string; supported: boolean }[];
+  segments: number;
+  duration: number;
+  format: string | null;
+}
+
 export interface UpdateInfo {
   version: string;
   available: boolean;
@@ -118,6 +127,7 @@ export interface AddOptions {
   start?: boolean;
   /** 附加请求头（来自浏览器的 Cookie、Referer 等） */
   headers?: [string, string][];
+  hls?: boolean;
 }
 
 export interface DiskInfo {
@@ -152,6 +162,7 @@ export const api = {
   getSettings: () => backend.call<Settings>("get_settings"),
   setSettings: (settings: Settings) => backend.call<Settings>("set_settings", { settings }),
   addTasks: (urls: string[], options: AddOptions) => backend.call<Task[]>("add_tasks", { urls, options }),
+  inspectHls: (url: string, headers: [string, string][] = []) => backend.call<HlsInfo>("inspect_hls", { url, headers }),
   pause: (ids: string[]) => backend.call<void>("pause_tasks", { ids }),
   resume: (ids: string[]) => backend.call<void>("resume_tasks", { ids }),
   remove: (ids: string[], deleteFile: boolean) => backend.call<void>("remove_tasks", { ids, deleteFile }),

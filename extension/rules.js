@@ -3,6 +3,7 @@
 export const DEFAULTS = {
   /** 是否拦截浏览器下载 */
   enabled: true,
+  videoSniff: true,
   /** 小于该大小（KB）的文件交给浏览器，0 表示不限 */
   minSizeKB: 0,
   /** 只拦截这些扩展名（逗号/空格分隔），留空表示全部 */
