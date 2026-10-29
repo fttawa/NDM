@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
 
-export function Switch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+export function Switch({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label?: string }) {
   return (
     <button
       type="button"
       role="switch"
+      aria-label={label}
       aria-checked={checked}
       className={`switch ${checked ? "on" : ""}`}
       onClick={() => onChange(!checked)}

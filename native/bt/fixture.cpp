@@ -4,7 +4,7 @@
 
 int main(int argc, char** argv) {
     try {
-        if (argc != 3) throw std::runtime_error("Usage: ndm-bt-fixture ROOT v1|v2|hybrid");
+        if (argc < 3 || argc > 4) throw std::runtime_error("Usage: ndm-bt-fixture ROOT v1|v2|hybrid|private [TRACKER]");
         auto root = fs::u8path(argv[1]); std::string mode = argv[2];
         auto seed = root / L"seed"; fs::create_directories(seed / L"pack/sub");
         std::vector<std::pair<std::string, int>> files{{"pack/a.bin", 1024 * 1024 + 47}, {"pack/sub/b.bin", 512 * 1024 + 13}};
@@ -13,8 +13,10 @@ int main(int argc, char** argv) {
             for (int i = 0; i < file.second; ++i) out.put(static_cast<char>((i * 31 + i / 1024) % 251));
             if (!out) throw std::runtime_error("Cannot write fixture");
         }
-        auto flags = mode == "v1" ? lt::create_torrent::v1_only : mode == "v2" ? lt::create_torrent::v2_only : lt::create_flags_t{};
+        auto flags = mode == "v1" || mode == "private" ? lt::create_torrent::v1_only : mode == "v2" ? lt::create_torrent::v2_only : lt::create_flags_t{};
         lt::create_torrent maker(lt::list_files((seed / L"pack").u8string()), 32768, flags);
+        if (mode == "private") maker.set_priv(true);
+        if (argc == 4) maker.add_tracker(argv[3]);
         lt::set_piece_hashes(maker, seed.u8string());
         auto value = maker.generate(); value.dict().erase("creation date");
         std::vector<char> bytes; lt::bencode(std::back_inserter(bytes), value);

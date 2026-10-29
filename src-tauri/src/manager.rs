@@ -8,6 +8,7 @@ use crate::util;
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager as _};
@@ -27,6 +28,7 @@ pub struct Manager {
     storage: Storage,
     pending_import: Mutex<Option<(String, ExportBundle)>>,
     pub torrent_engine: crate::torrent::Engine,
+    updating: AtomicBool,
 }
 
 pub struct AddOptions {
@@ -64,7 +66,7 @@ pub fn build_client(s: &Settings) -> Result<reqwest::Client, String> {
         _ => {}
     }
     builder
-        .user_agent(&s.user_agent)
+        .user_agent(crate::user_agent::effective(&s.user_agent))
         // 强制 HTTP/1.1：每个分段独占一条 TCP 连接，HTTP/2 多路复用会让多线程加速失效
         .http1_only()
         .connect_timeout(Duration::from_secs(15))
@@ -108,6 +110,8 @@ impl Manager {
         }
         settings.max_concurrent = settings.max_concurrent.clamp(1, 16);
         settings.connections = settings.connections.clamp(1, 32);
+        settings.bt.validate()?;
+        crate::user_agent::migrate_legacy(&mut settings.user_agent);
 
         let mut tasks: Vec<Task> = match storage.load_tasks()? {
             Some(tasks) => tasks,
@@ -119,11 +123,14 @@ impl Manager {
             }
         };
         for t in tasks.iter_mut() {
+            let update_resume = std::mem::take(&mut t.resume_after_update);
             t.speed = 0;
             t.active_conns = 0;
             t.boost = 0;
-            if matches!(t.status, Status::Active | Status::Waiting) {
-                t.status = if settings.resume_on_start {
+            if matches!(t.status, Status::Active | Status::Waiting)
+                || (update_resume && t.status == Status::Paused)
+            {
+                t.status = if settings.resume_on_start || update_resume {
                     Status::Waiting
                 } else {
                     Status::Paused
@@ -153,6 +160,7 @@ impl Manager {
             storage,
             pending_import: Mutex::new(None),
             torrent_engine: Default::default(),
+            updating: AtomicBool::new(false),
         }))
     }
 
@@ -164,6 +172,97 @@ impl Manager {
 
     pub fn settings(&self) -> Settings {
         self.settings.read().clone()
+    }
+
+    pub fn set_browser_user_agent(&self, value: String) -> Result<(), String> {
+        let _guard = self.persist_lock.lock();
+        crate::user_agent::set_browser(value)?;
+        *self.client.write() = build_client(&self.settings())?;
+        Ok(())
+    }
+
+    pub async fn prepare_update(self: &Arc<Self>) -> Result<(), String> {
+        self.updating.store(true, Ordering::Release);
+        let ids: Vec<_> = {
+            let mut tasks = self.tasks.lock();
+            tasks
+                .iter_mut()
+                .filter(|t| matches!(t.status, Status::Active | Status::Waiting))
+                .map(|t| {
+                    t.resume_after_update = true;
+                    t.id.clone()
+                })
+                .collect()
+        };
+        self.pause(&ids);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(25);
+        while !self.active.lock().is_empty() {
+            if tokio::time::Instant::now() >= deadline {
+                self.abort_update();
+                return Err("下载任务尚未安全停止，已取消本次安装，稍后自动重试".into());
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        let result = {
+            let _guard = self.persist_lock.lock();
+            self.storage
+                .save_tasks(&self.tasks.lock())
+                .map_err(|_| "保存下载进度失败，已取消安装".to_string())
+        };
+        if result.is_err() {
+            self.abort_update();
+        }
+        result
+    }
+
+    pub fn abort_update(self: &Arc<Self>) {
+        let ids: Vec<_> = self
+            .tasks
+            .lock()
+            .iter_mut()
+            .filter_map(|t| std::mem::take(&mut t.resume_after_update).then(|| t.id.clone()))
+            .collect();
+        self.updating.store(false, Ordering::Release);
+        self.resume(&ids);
+        self.persist();
+    }
+
+    pub fn bt_details(&self, id: &str) -> Result<Option<crate::bt_config::Runtime>, String> {
+        {
+            let tasks = self.tasks.lock();
+            let task = tasks
+                .iter()
+                .find(|task| task.id == id)
+                .ok_or("任务不存在")?;
+            if task.torrent.is_none() {
+                return Err("该任务不是 BT 下载".into());
+            }
+        }
+        let runtime = self.active.lock().get(id).cloned();
+        Ok(runtime.and_then(|rt| rt.bt_details.lock().clone()))
+    }
+
+    pub fn refresh_bt_metadata(&self, id: &str) -> Result<(), String> {
+        let task = self.task(id).ok_or("任务不存在")?;
+        let source = task.torrent.ok_or("该任务不是 BT 下载")?;
+        if source.metainfo.is_empty() || source.file_sizes.len() == source.files.len() {
+            return Ok(());
+        }
+        let (new_source, _, _) = crate::libtorrent::inspect_for(&source.metainfo, source.version)?;
+        if new_source.info_hash != source.info_hash {
+            return Err("BT 元数据哈希不匹配".into());
+        }
+        self.update_task(id, |task| {
+            if task.torrent.as_ref().is_some_and(|current| {
+                current.info_hash == new_source.info_hash
+                    && current.file_sizes.len() != current.files.len()
+            }) {
+                task.torrent = Some(new_source);
+            }
+        });
+        self.persist();
+        self.emit_tasks();
+        Ok(())
     }
 
     pub fn export_data(&self, path: &Path) -> Result<(), String> {
@@ -205,9 +304,11 @@ impl Manager {
         }
         bundle.settings.max_concurrent = bundle.settings.max_concurrent.clamp(1, 16);
         bundle.settings.connections = bundle.settings.connections.clamp(1, 32);
+        bundle.settings.bt.validate()?;
         let client = build_client(&bundle.settings)?;
         let mut tasks = self.tasks.lock();
         for task in &mut bundle.tasks {
+            task.resume_after_update = false;
             task.speed = 0;
             task.active_conns = 0;
             task.boost = 0;
@@ -320,6 +421,7 @@ impl Manager {
         let guard = self.persist_lock.lock();
         s.max_concurrent = s.max_concurrent.clamp(1, 16);
         s.connections = s.connections.clamp(1, 32);
+        s.bt.validate()?;
         s.proxy_url = s.proxy_url.trim().to_string();
         let net_changed = {
             let cur = self.settings.read();
@@ -370,10 +472,16 @@ impl Manager {
         self.torrent_engine.set_limit(per_task);
     }
     pub fn schedule(self: &Arc<Self>) {
+        if self.updating.load(Ordering::Acquire) {
+            return;
+        }
         let max = self.settings.read().max_concurrent as usize;
         let mut started = Vec::new();
         {
             let mut active = self.active.lock();
+            if self.updating.load(Ordering::Acquire) {
+                return;
+            }
             let mut tasks = self.tasks.lock();
             for t in tasks.iter_mut() {
                 if active.len() >= max {
@@ -400,7 +508,10 @@ impl Manager {
         let res = engine::run(self.clone(), id.clone(), rt.clone()).await;
         let mut done_name = None;
         {
-            self.active.lock().remove(&id);
+            // Do not report an idle engine until the final piece/segment
+            // progress has been copied back; the updater waits on this lock.
+            let mut active = self.active.lock();
+            active.remove(&id);
             let mut tasks = self.tasks.lock();
             if let Some(t) = tasks.iter_mut().find(|t| t.id == id) {
                 if rt.segmented.load(std::sync::atomic::Ordering::Acquire) {
@@ -682,6 +793,7 @@ impl Manager {
                 active_conns: 0,
                 boost: 0,
                 latency_ms: 0,
+                resume_after_update: false,
             });
         }
         // 新任务放在最前面；文件名检查与插入在同一把锁内完成。

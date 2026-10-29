@@ -5,6 +5,9 @@ import { Sidebar, TitleBar, Toast } from "./components/Shell";
 import { TaskDrawer } from "./components/TaskDrawer";
 import { HomeView } from "./components/HomeView";
 import { TasksView } from "./components/TasksView";
+import { BtSettingsView } from "./components/BtSettingsView";
+import { BtDetailView } from "./components/BtDetailView";
+import { UpdateNotice } from "./components/UpdateNotice";
 import { api, isTauri, readClipboard, type Settings } from "./lib/api";
 import { extractUrls } from "./lib/format";
 import { filterTasks, useStore } from "./store";
@@ -100,9 +103,10 @@ export default function App() {
       <Sidebar />
       <main className="main">
         <TitleBar />
-        <div className="content" key={`${view}-${filter}`}>{view === "home" ? <HomeView /> : view === "tasks" ? <TasksView /> : <SettingsView />}</div>
+        <div className="content" key={`${view}-${filter}`}>{view === "home" ? <HomeView /> : view === "tasks" ? <TasksView /> : view === "bt-detail" ? <BtDetailView /> : view === "bt-settings" ? <BtSettingsView /> : <SettingsView />}</div>
       </main>
       <TaskDrawer />
+      <UpdateNotice />
       <AddTaskModal />
       <ConfirmRemoveModal />
       <Toast />

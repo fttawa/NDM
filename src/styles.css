@@ -1091,6 +1091,42 @@ button {
 }
 
 /* ============ 设置 ============ */
+.settings-tabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+.bt-fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.bt-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.bt-settings-grid .tile { min-width: 0; }
+.bt-settings-grid .field { display: flex; flex-direction: column; gap: 8px; margin: 0; }
+.bt-addresses { width: 100%; min-height: 138px; resize: vertical; line-height: 1.7; font-size: 12px; }
+.bt-settings-actions { display: flex; align-items: center; gap: 14px; padding: 20px 0; }
+.bt-settings-actions > span { margin-left: auto; }
+.bt-back { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 22px; border: 0; background: none; color: var(--text-2); cursor: pointer; padding: 0; }
+.bt-heading { min-width: 0; }
+.bt-heading h1 { overflow-wrap: anywhere; font-size: 26px; margin: 8px 0 12px; }
+.bt-eyebrow { font-size: 11px; letter-spacing: .08em; color: var(--text-2); }
+.bt-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.bt-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 22px; }
+.bt-progress { display: flex; flex-direction: column; gap: 14px; margin-bottom: 24px; }
+.bt-progress-track { height: 10px; background: var(--track); overflow: hidden; border-radius: 6px; }
+.bt-progress-track > span { display: block; height: 100%; background: var(--accent); transition: width .4s; }
+.bt-progress .bt-sub { justify-content: space-between; }
+.bt-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 16px; }
+.bt-metrics .tile { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 20px; }
+.bt-metrics b { font-size: 23px; overflow-wrap: anywhere; }
+.bt-info { margin: 0; }
+.bt-info dd { overflow-wrap: anywhere; }
+.bt-copy { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.bt-copy > span { min-width: 0; flex: 1; }
+.bt-copy .icon-btn { flex: none; }
+.bt-files > p, .bt-trackers > p { margin-top: 0; }
+.bt-file-row, .bt-tracker-row { padding: 14px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; font-size: 13px; }
+.bt-file-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; }
+.bt-tracker-row > p { margin: 6px 0 0; }
+.bt-pagination { display: flex; align-items: center; justify-content: center; gap: 20px; margin-top: 16px; }
+@media (max-width: 1100px) { .bt-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) {
+  .bt-settings-grid { grid-template-columns: minmax(0, 1fr); }
+  .bt-settings-actions { flex-wrap: wrap; }
+}
 .settings-bento {
   grid-auto-rows: minmax(132px, auto);
 }
@@ -1208,7 +1244,17 @@ button {
   display: flex;
   align-items: center;
   gap: 16px;
+  align-self: start;
 }
+.about-tile .muted { margin-top: 6px; }
+.release-notes { max-height: 240px; overflow: auto; overflow-wrap: anywhere; line-height: 1.7; }
+.release-notes p { margin: 8px 0; }
+.release-notes code { font-family: var(--mono, monospace); padding: 1px 5px; border-radius: 4px; background: var(--track); color: var(--text); }
+.release-heading { font-weight: 650; color: var(--text); }
+.release-bullet { display: flex; gap: 8px; margin: 5px 0; }
+.update-notes summary { cursor: pointer; font-size: 13px; }
+.update-notice { position: fixed; bottom: 20px; right: 20px; z-index: 90; display: flex; gap: 12px; align-items: center; max-width: 420px; padding: 14px 18px; border-radius: 12px; background: var(--tint-solid); font-size: 13px; }
+.update-notice p { margin: 5px 0 0; }
 .about-logo img {
   width: 56px;
   height: 56px;

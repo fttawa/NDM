@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createServer } from 'node:http';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const helperArg = process.argv.indexOf('--helper');
@@ -21,7 +22,7 @@ class Process {
     this.child.stdin.on('error', () => {});
     createInterface({ input: this.child.stdout }).on('line', line => {
       const event = JSON.parse(line);
-      if (process.env.NDM_BT_TEST_TRACE) console.log({ ...event, metainfo: event.metainfo ? '(cached)' : undefined });
+      if (process.env.NDM_BT_TEST_TRACE) console.log(JSON.stringify({ ...event, metainfo: event.metainfo ? '(cached)' : undefined }));
       if (this.pending.length) this.pending.shift()(event); else this.events.push(event);
     });
     this.done = new Promise(resolve => this.child.on('close', code => { this.exited = true; this.code = code; resolve(code); }));
@@ -47,11 +48,11 @@ class Process {
   }
 }
 
-async function fixture(mode, action) {
+async function fixture(mode, action, tracker) {
   const temp = mkdtempSync(path.join(tmpdir(), 'ndm-native-bt-'));
   const processes = [];
   try {
-    const seed = new Process(seeder, [temp, mode]); processes.push(seed);
+    const seed = new Process(seeder, [temp, mode, ...(tracker ? [tracker] : [])]); processes.push(seed);
     const info = await seed.next(); assert.equal(info.type, 'fixture');
     assert.equal(info.version, mode === 'v2' ? 2 : 1);
     assert.equal(info.total, 1572924);
@@ -69,6 +70,59 @@ async function fixture(mode, action) {
     rmSync(temp, { recursive: true, force: true });
   }
 }
+
+test('BT settings: tracker-only discovery, live reconfiguration, telemetry and supplemental tracker isolation', { timeout: 60000 }, async () => {
+  let peerPort = 0;
+  const requests = [];
+  const tracker = createServer((req, res) => {
+    requests.push(req.url);
+    if (req.url.startsWith('/fail')) { res.writeHead(500).end(); return; }
+    const peer = Buffer.from([127, 0, 0, 1, peerPort >> 8, peerPort & 255]);
+    res.end(Buffer.concat([Buffer.from('d8:intervali60e5:peers6:'), peer, Buffer.from('e')]));
+  });
+  await new Promise(resolve => tracker.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${tracker.address().port}/announce`;
+  try {
+    await fixture('v2', async ({ info, start }) => {
+      peerPort = Number(new URL(info.url).searchParams.get('x.pe').split(':').pop());
+      const magnet = new URL(info.url); magnet.searchParams.delete('x.pe');
+      const bt = { dht: false, pex: false, lsd: false, upnp: false, bootstrapNodes: [], trackers: [url, url], maxPeers: 23, uploadLimit: 7 };
+      const p = start('', 48 * 1024, undefined, { localTest: false, url: magnet.href, bt });
+      let cached;
+      const progress = await until(p, e => {
+        if (e.type === 'metadata') cached = e.metainfo;
+        return e.type === 'progress' && e.details?.trackers.some(t => t.state === 'working') && e.downloaded > 0;
+      });
+      assert.ok(requests.length > 0, 'Tracker must receive an actual announce');
+      assert.equal(progress.details.dht, false); assert.equal(progress.details.pex, false);
+      assert.equal(progress.details.maxPeers, 23); assert.equal(progress.details.uploadLimit, 7);
+      assert.equal(progress.details.trackers.length, 1, 'Configured trackers are deduplicated');
+      assert.equal(progress.details.fileProgress.length, info.files.length);
+      const inspection = spawnSync(engine, { input: JSON.stringify({ type: 'inspect', metainfo: cached }) + '\n', encoding: 'utf8', windowsHide: true });
+      const parsed = JSON.parse(inspection.stdout);
+      assert.equal(parsed.fileSizes.reduce((a,b)=>a+b,0), info.total);
+      assert.deepEqual(parsed.trackers, [], 'Supplemental trackers must not leak into cached metadata');
+      p.send({ type: 'configure', bt: { ...bt, maxPeers: 37, uploadLimit: 11, trackers: [url.replace('/announce','/fail')] } });
+      const changed = await until(p, e => e.details?.maxPeers === 37 && e.details.trackers.some(t => t.state === 'error'));
+      assert.equal(changed.details.uploadLimit, 11);
+      assert.equal(changed.details.trackers.length, 1);
+      assert.ok(changed.details.trackers[0].message);
+      p.send({ type: 'stop' }); await until(p, e => e.type === 'stopped');
+    });
+    requests.length = 0;
+    await fixture('private', async ({ info, start }) => {
+      peerPort = Number(new URL(info.url).searchParams.get('x.pe').split(':').pop());
+      const p = start(info.metainfo, 48 * 1024, undefined, { localTest: false, bt: {
+        dht: false, pex: true, lsd: false, upnp: false, bootstrapNodes: [], trackers: [url.replace('/announce','/supplemental')], maxPeers: 80, uploadLimit: 0,
+      }});
+      const progress = await until(p, e => e.details?.private && e.details.trackers.some(t => t.state === 'working'));
+      assert.equal(progress.details.dht, false); assert.equal(progress.details.pex, false);
+      assert.deepEqual(progress.details.trackers.map(t=>t.url), [url]);
+      assert.ok(requests.every(r => !r.startsWith('/supplemental')));
+      p.send({ type: 'stop' }); await until(p, e=>e.type==='stopped');
+    }, url);
+  } finally { tracker.closeAllConnections(); await new Promise(resolve => tracker.close(resolve)); }
+});
 
 async function until(p, predicate, authorize = true) {
   const deadline = Date.now() + 45000;

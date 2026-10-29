@@ -122,6 +122,7 @@ pub struct ActiveRt {
     pub segmented: AtomicBool,
     pub single: AtomicU64,
     pub torrent_speed: AtomicU64,
+    pub bt_details: Mutex<Option<crate::bt_config::Runtime>>,
     /// 已建立（连接中 + 传输中）的连接数
     pub conns: AtomicU32,
     /// 已收到响应、正在传输数据的连接数
@@ -142,6 +143,7 @@ impl ActiveRt {
             segmented: AtomicBool::new(false),
             single: AtomicU64::new(0),
             torrent_speed: AtomicU64::new(0),
+            bt_details: Mutex::new(None),
             conns: AtomicU32::new(0),
             streaming: AtomicU32::new(0),
             workers: AtomicU32::new(0),

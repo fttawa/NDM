@@ -32,17 +32,36 @@ jobs:
       - name: Native build tools
         run: choco install nasm strawberryperl ninja --no-progress -y
 
+      - name: Prepare release notes
+        id: notes
+        run: |
+          $delimiter = [guid]::NewGuid().ToString()
+          "body<<$delimiter" >> $env:GITHUB_OUTPUT
+          Get-Content -LiteralPath RELEASE_NOTES.md -Raw >> $env:GITHUB_OUTPUT
+          "$delimiter" >> $env:GITHUB_OUTPUT
+
       - name: Build and publish Tauri release
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: .
           tauriScript: pnpm tauri
           tagName: ${{ github.ref_name }}
           releaseName: "NDM ${{ github.ref_name }}"
-          releaseBody: |
-            请查看下方安装包并下载 Windows x64 版本。
-          releaseDraft: false
+          releaseBody: ${{ steps.notes.outputs.body }}
+          releaseDraft: true
           prerelease: false
-          uploadUpdaterJson: false
+          uploadUpdaterJson: true
+
+      - name: Publish signed release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view ${{ github.ref_name }} --json assets --jq '.assets[].name' | Set-Content release-assets.txt
+          $assets = Get-Content release-assets.txt
+          if (-not ($assets -contains 'latest.json') -or -not ($assets -match '\.sig$')) { throw 'Signed updater artifacts are missing' }
+          gh release edit ${{ github.ref_name }} --draft=false --latest --notes-file RELEASE_NOTES.md
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to publish release' }

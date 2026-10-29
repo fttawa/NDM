@@ -42,8 +42,11 @@ json details_for(lt::torrent_info const& ti, int version) {
     return details;
 }
 
-std::vector<char> cache_metadata(lt::add_torrent_params const& params) {
+std::vector<char> cache_metadata(lt::add_torrent_params params, std::vector<lt::announce_entry> const& original) {
     if (!params.ti) return {};
+    // Supplemental trackers are settings, not part of the saved torrent identity.
+    params.trackers.clear(); params.tracker_tiers.clear();
+    for (auto const& tracker : original) { params.trackers.push_back(tracker.url); params.tracker_tiers.push_back(tracker.tier); }
     // Preserve the exact info bytes: re-encoding the info dictionary changes hashes.
     lt::entry value;
     try {
@@ -72,6 +75,39 @@ int rate(json const& value) {
     return static_cast<int>((std::min)(value.get<std::uint64_t>(), std::uint64_t(INT_MAX)));
 }
 
+lt::settings_pack bt_settings(json const& bt, bool local) {
+    lt::settings_pack s;
+    s.set_bool(lt::settings_pack::enable_dht, !local && bt.value("dht", true));
+    s.set_bool(lt::settings_pack::enable_lsd, !local && bt.value("lsd", false));
+    s.set_bool(lt::settings_pack::enable_upnp, !local && bt.value("upnp", false));
+    s.set_bool(lt::settings_pack::enable_natpmp, !local && bt.value("upnp", false));
+    s.set_int(lt::settings_pack::connections_limit, std::clamp(bt.value("maxPeers", 80), 10, 500));
+    s.set_int(lt::settings_pack::upload_rate_limit, rate(json(bt.value("uploadLimit", std::uint64_t(0)) * 1024)));
+    if (bt.contains("bootstrapNodes")) {
+        std::string nodes;
+        for (auto const& node : bt["bootstrapNodes"]) { if (!nodes.empty()) nodes += ','; nodes += node.get<std::string>(); }
+        s.set_str(lt::settings_pack::dht_bootstrap_nodes, nodes);
+    }
+    return s;
+}
+
+json tracker_details(lt::torrent_handle const& handle) {
+    json result = json::array();
+    for (auto const& tracker : handle.trackers()) {
+        bool updating = false, working = false; std::string message;
+        for (auto const& endpoint : tracker.endpoints) for (auto const& hash : endpoint.info_hashes) {
+            updating |= hash.updating;
+            // A successful event=paused (metadata authorization) doesn't set
+            // start_sent. Its response still sets min_announce. Count any
+            // successful interface even if other interfaces cannot reach it.
+            working |= tracker.verified && !hash.last_error && hash.min_announce != lt::time_point32::min();
+            if (hash.last_error) message = hash.message.empty() ? hash.last_error.message() : hash.message;
+        }
+        result.push_back({{"url", tracker.url}, {"state", working ? "working" : updating ? "announcing" : message.empty() ? "waiting" : "error"}, {"message", working ? "" : message}});
+    }
+    return result;
+}
+
 void run(json const& config, Input& input) {
     auto hash = config.at("hash").get<std::string>();
     int version = config.value("version", hash.size() == 64 ? 2 : 1);
@@ -93,6 +129,9 @@ void run(json const& config, Input& input) {
     auto s = settings(config.value("localTest", false));
     s.set_int(lt::settings_pack::download_rate_limit, rate(config.value("limit", json(0))));
     lt::session session(s);
+    bool local = config.value("localTest", false);
+    json bt = config.value("bt", json::object());
+    session.apply_settings(bt_settings(bt, local));
     // Apply the global limiter to LAN peers too, using the supported peer-class API.
     lt::ip_filter filter;
     filter.add_rule(lt::make_address("0.0.0.0"), lt::make_address("255.255.255.255"), 1);
@@ -102,18 +141,39 @@ void run(json const& config, Input& input) {
     params.flags &= ~(lt::torrent_flags::paused | lt::torrent_flags::auto_managed);
     params.flags |= lt::torrent_flags::upload_mode | lt::torrent_flags::default_dont_download;
     auto handle = session.add_torrent(params);
+    auto original_trackers = handle.trackers();
+    auto apply_torrent_settings = [&] {
+        bool priv = handle.torrent_file() && handle.torrent_file()->priv();
+        if (!bt.value("pex", true) || priv || local) handle.set_flags(lt::torrent_flags::disable_pex);
+        else handle.unset_flags(lt::torrent_flags::disable_pex);
+        if (!bt.value("dht", true) || priv || local) handle.set_flags(lt::torrent_flags::disable_dht);
+        else handle.unset_flags(lt::torrent_flags::disable_dht);
+        auto trackers = original_trackers; std::set<std::string> seen;
+        for (auto const& tracker : trackers) seen.insert(tracker.url);
+        if (!priv && !local && bt.contains("trackers")) for (auto const& value : bt["trackers"]) {
+            auto url = value.get<std::string>();
+            if (seen.insert(url).second) { lt::announce_entry entry(url); entry.tier = 127; entry.source = lt::announce_entry::source_client; trackers.push_back(entry); }
+        }
+        auto current = handle.trackers();
+        bool changed = current.size() != trackers.size();
+        for (std::size_t i = 0; !changed && i < current.size(); ++i) changed = current[i].url != trackers[i].url;
+        if (changed) handle.replace_trackers(trackers);
+    };
+    apply_torrent_settings();
     auto connect = [&] { for (auto const& peer : peers) handle.connect_peer(peer); };
     connect();
     bool authorized = false, metadata_sent = false, requested = false;
     json details;
     auto deadline = Clock::now() + std::chrono::seconds(180);
     auto progress_at = Clock::time_point::min();
+    auto details_at = Clock::time_point::min();
+    int dht_nodes = 0;
     auto metadata = [&](lt::add_torrent_params const& p) {
         if (!p.ti) return false;
         auto candidate = details_for(*p.ti, version);
         if (candidate["infoHash"] != hash || candidate["version"] != version)
             throw std::runtime_error("Peer metadata hash mismatch");
-        auto raw = cache_metadata(p);
+        auto raw = cache_metadata(p, original_trackers);
         if (raw.empty()) return false;
         details = std::move(candidate);
         emit({{"type", "metadata"}, {"metainfo", encode64(raw)}}); return true;
@@ -144,6 +204,10 @@ void run(json const& config, Input& input) {
             if (command.at("type") == "limit") {
                 lt::settings_pack change; change.set_int(lt::settings_pack::download_rate_limit, rate(command.at("bps")));
                 session.apply_settings(change);
+            } else if (command.at("type") == "configure") {
+                bt = command.at("bt"); session.apply_settings(bt_settings(bt, local));
+                if (!bt.value("dht", true)) dht_nodes = 0;
+                apply_torrent_settings(); details_at = Clock::time_point::min();
             } else if (command.at("type") == "start" && metadata_sent && !authorized) {
                 safe_output(root, details, hash);
                 handle.prioritize_files(std::vector<lt::download_priority_t>(handle.torrent_file()->num_files(), lt::default_priority));
@@ -153,7 +217,9 @@ void run(json const& config, Input& input) {
         }
         std::vector<lt::alert*> alerts; session.pop_alerts(&alerts);
         for (auto alert : alerts) {
-            if (auto saved = lt::alert_cast<lt::save_resume_data_alert>(alert)) {
+            if (auto stats = lt::alert_cast<lt::dht_stats_alert>(alert)) {
+                dht_nodes = 0; for (auto const& bucket : stats->routing_table) dht_nodes += bucket.num_nodes;
+            } else if (auto saved = lt::alert_cast<lt::save_resume_data_alert>(alert)) {
                 if (!metadata_sent) {
                     metadata_sent = metadata(saved->params);
                     if (!metadata_sent) throw std::runtime_error("Cannot cache torrent metadata");
@@ -169,6 +235,7 @@ void run(json const& config, Input& input) {
         if (status.has_metadata && !requested) {
             // Validate all paths before authorizing any content download.
             details_for(*handle.torrent_file(), version);
+            apply_torrent_settings();
             handle.save_resume_data(lt::torrent_handle::save_info_dict); requested = true;
         }
         if (!metadata_sent && Clock::now() > deadline) throw std::runtime_error("Magnet metadata timed out; no metadata peer found");
@@ -176,8 +243,27 @@ void run(json const& config, Input& input) {
         auto now = Clock::now();
         if (progress_at == Clock::time_point::min() || now - progress_at >= std::chrono::milliseconds(250)) {
             bool checking = status.state == lt::torrent_status::checking_files || status.state == lt::torrent_status::checking_resume_data;
-            emit({{"type", "progress"}, {"downloaded", status.total_wanted_done},
-                {"speed", checking ? 0 : status.download_payload_rate}, {"peers", status.num_peers}, {"checking", checking}});
+            json event{{"type", "progress"}, {"downloaded", status.total_wanted_done},
+                {"speed", checking ? 0 : status.download_payload_rate}, {"peers", status.num_peers}, {"checking", checking}};
+            if (details_at == Clock::time_point::min() || now - details_at >= std::chrono::seconds(1)) {
+                bool priv = status.has_metadata && handle.torrent_file()->priv();
+                json files = json::array();
+                if (status.has_metadata) {
+                    auto done = handle.file_progress(lt::torrent_handle::piece_granularity);
+                    auto const& layout = handle.torrent_file()->layout();
+                    for (auto index : layout.file_range()) if (!(layout.file_flags(index) & lt::file_storage::flag_pad_file)) files.push_back(done[static_cast<std::size_t>(static_cast<int>(index))]);
+                }
+                event["details"] = {{"phase", !status.has_metadata ? "metadata" : checking ? "checking" : authorized ? "downloading" : "preparing"},
+                    {"peers", status.num_peers}, {"seeds", status.num_seeds}, {"uploadSpeed", status.upload_payload_rate},
+                    {"uploaded", status.total_payload_upload}, {"dhtNodes", dht_nodes}, {"pieces", status.num_pieces},
+                    {"totalPieces", status.has_metadata ? handle.torrent_file()->num_pieces() : 0}, {"fileProgress", files},
+                    {"dht", !priv && !local && bt.value("dht", true)}, {"pex", !priv && !local && bt.value("pex", true)},
+                    {"private", priv}, {"maxPeers", bt.value("maxPeers", 80)}, {"uploadLimit", bt.value("uploadLimit", 0)},
+                    {"trackers", tracker_details(handle)}};
+                if (!local && bt.value("dht", true)) session.post_dht_stats();
+                details_at = now;
+            }
+            emit(event);
             progress_at = now;
         }
         session.wait_for_alert(std::chrono::milliseconds(50));
@@ -191,7 +277,8 @@ int main() {
         auto const& request = commands.front();
         if (request.at("type") == "inspect") {
             auto params = lt::load_torrent_buffer(decode64(request.at("metainfo").get<std::string>()));
-            emit(details_for(*params.ti, request.value("version", 0)));
+            auto details = details_for(*params.ti, request.value("version", 0));
+            details["trackers"] = params.trackers; emit(details);
         } else if (request.at("type") == "run") run(request, input);
         else throw std::runtime_error("Unknown engine command");
         return 0;

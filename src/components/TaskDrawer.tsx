@@ -7,7 +7,7 @@ import { FileIcon, SegmentBar, StatusChip, fileKind } from "./TaskCard";
 
 export function TaskDrawer() {
   const id = useStore((s) => s.selectedId);
-  const task = useStore((s) => s.tasks.find((t) => t.id === s.selectedId));
+  const task = useStore((s) => s.tasks.find((t) => t.id === s.selectedId && !t.torrent));
   const select = useStore((s) => s.select);
   const askRemove = useStore((s) => s.askRemove);
   const showToast = useStore((s) => s.showToast);

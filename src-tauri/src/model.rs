@@ -62,6 +62,8 @@ pub struct Task {
     /// 请求延迟（毫秒），0 表示未测得
     #[serde(default)]
     pub latency_ms: u32,
+    #[serde(default)]
+    pub resume_after_update: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -89,6 +91,9 @@ pub struct Settings {
     pub proxy_url: String,
     /// 连接超频：按测得的请求延迟提前补连接，最多加开每任务连接数的一半
     pub overclock: bool,
+    pub bt: crate::bt_config::BtSettings,
+    pub auto_update: bool,
+    pub update_mirrors: bool,
 }
 
 impl Default for Settings {
@@ -98,7 +103,7 @@ impl Default for Settings {
             max_concurrent: 3,
             connections: 8,
             speed_limit: 0,
-            user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36".into(),
+            user_agent: String::new(),
             notify: true,
             clipboard_watch: true,
             close_to_tray: true,
@@ -109,6 +114,9 @@ impl Default for Settings {
             proxy_mode: "system".into(),
             proxy_url: String::new(),
             overclock: true,
+            bt: Default::default(),
+            auto_update: true,
+            update_mirrors: true,
         }
     }
 }

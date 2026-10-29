@@ -43,12 +43,12 @@ export function Sidebar() {
         <button className={`nav-btn ${view === "home" ? "active" : ""}`} onClick={() => setView("home")} aria-current={view === "home" ? "page" : undefined}>
           <House size={18} /><span>首页</span>
         </button>
-        <button className={`nav-btn ${view === "tasks" ? "active" : ""}`} onClick={() => setView("tasks")} aria-current={view === "tasks" ? "page" : undefined}>
+        <button className={`nav-btn ${view === "tasks" || view === "bt-detail" ? "active" : ""}`} onClick={() => setView("tasks")} aria-current={view === "tasks" || view === "bt-detail" ? "page" : undefined}>
           <ArrowDownToLine size={18} /><span>下载</span>
         </button>
       </div>
       <div className="nav-footer">
-        <button className={`nav-btn ${view === "settings" ? "active" : ""}`} onClick={() => setView("settings")} aria-current={view === "settings" ? "page" : undefined}>
+        <button className={`nav-btn ${view === "settings" || view === "bt-settings" ? "active" : ""}`} onClick={() => setView("settings")} aria-current={view === "settings" || view === "bt-settings" ? "page" : undefined}>
           <Settings2 size={18} /><span>设置</span>
         </button>
       </div>

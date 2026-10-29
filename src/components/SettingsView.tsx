@@ -1,4 +1,4 @@
-import { Bell, Clipboard, Copy, FolderOpen, Gauge, Globe, Layers, Network, Palette, Plug, Power, Zap } from "lucide-react";
+import { Bell, Clipboard, Copy, FolderOpen, Gauge, Globe, Layers, Network, Palette, Plug, Power, RefreshCw, Zap } from "lucide-react";
 
 const GITHUB_URL = "https://github.com/fttawa/NDM";
 
@@ -11,16 +11,22 @@ function GithubMark({ size = 14 }: { size?: number }) {
   );
 }
 import { useEffect, useState } from "react";
-import { api, pickDirectory, pickExportPath, pickImportPath, writeClipboard, type ImportPreview, type UpdateInfo, type BridgeStatus, type Settings } from "../lib/api";
+import { api, pickDirectory, pickExportPath, pickImportPath, writeClipboard, type ImportPreview, type BridgeStatus, type Settings } from "../lib/api";
 import { useStore } from "../store";
 import { Segmented, Slider, Switch } from "./ui";
 import { Modal } from "./Modals";
+import { SettingsTabs } from "./BtSettingsView";
+import { ReleaseNotes } from "./ReleaseNotes";
+import { updateBusy, updateLabels, useUpdateStatus } from "./UpdateNotice";
+import { bytes, dateTime } from "../lib/format";
 
 const settingLabels: Record<keyof Settings, string> = {
   downloadDir: "默认下载目录", maxConcurrent: "同时下载任务数", connections: "每任务连接数",
   speedLimit: "全局限速", userAgent: "User-Agent", notify: "完成通知", clipboardWatch: "剪贴板监听",
   closeToTray: "关闭到托盘", resumeOnStart: "启动时继续下载", glass: "窗口材质",
   browserIntegration: "浏览器集成", captureConfirm: "下载确认框", proxyMode: "代理模式", proxyUrl: "代理地址", overclock: "连接超频",
+  bt: "BT 下载配置",
+  autoUpdate: "自动更新", updateMirrors: "更新镜像回退",
 };
 
 function Tile({ icon, title, desc, className = "", children }: { icon: React.ReactNode; title: string; desc?: string; className?: string; children: React.ReactNode }) {
@@ -44,9 +50,10 @@ export function SettingsView() {
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [importing, setImporting] = useState(false);
   const [checking, setChecking] = useState(false);
-  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [update, setUpdate] = useUpdateStatus();
   const [updateError, setUpdateError] = useState("");
   const [ua, setUa] = useState("");
+  const [customUa, setCustomUa] = useState(false);
   const [limit, setLimit] = useState("0");
   const [proxyUrl, setProxyUrl] = useState("");
   const [testing, setTesting] = useState(false);
@@ -80,7 +87,7 @@ export function SettingsView() {
 
   useEffect(() => {
     if (settings) {
-      setUa(settings.userAgent);
+      setUa(settings.userAgent || navigator.userAgent);
       setLimit(String(settings.speedLimit));
       setProxyUrl(settings.proxyUrl);
     }
@@ -98,6 +105,7 @@ export function SettingsView() {
         </div>
       </header>
 
+      <SettingsTabs active="general" />
       <section className="bento settings-bento">
         <Tile icon={<FolderOpen size={18} />} title="默认下载目录" desc="新任务默认保存的位置" className="span-2">
           <div className="input-group">
@@ -150,7 +158,7 @@ export function SettingsView() {
           </label>
         </Tile>
 
-        <Tile icon={<Gauge size={18} />} title="全局限速" desc="0 表示不限速；HTTP 与 BT 按活跃任务数分配带宽，BT 最低 16 KB/s" className="span-2">
+        <Tile icon={<Gauge size={18} />} title="全局限速" desc="0 表示不限速；HTTP、HLS 与 BT 按活跃任务数分配带宽" className="span-2">
           <div className="input-group">
             <input
               className="input"
@@ -287,8 +295,10 @@ export function SettingsView() {
           </div>
         </Tile>
 
-        <Tile icon={<Globe size={18} />} title="User-Agent" desc="部分站点需要浏览器标识才能下载" className="span-2">
-          <textarea className="input mono" rows={3} value={ua} onChange={(e) => setUa(e.target.value)} onBlur={() => ua !== settings.userAgent && set("userAgent", ua)} />
+        <Tile icon={<Globe size={18} />} title="User-Agent" desc="浏览器扩展传入的真实 UA 始终优先" className="span-2">
+          <Segmented value={settings.userAgent || customUa ? "custom" : "browser"} onChange={v => { setCustomUa(v === "custom"); if (v === "browser") void set("userAgent", ""); }} options={[{value:"browser",label:"跟随浏览器"},{value:"custom",label:"自定义"}]} />
+          {(settings.userAgent || customUa) && <textarea aria-label="自定义 User-Agent" className="input mono" rows={3} value={ua} onChange={(e) => setUa(e.target.value)} onBlur={() => ua !== settings.userAgent && set("userAgent", ua.trim())} />}
+          <p className="muted small">手动添加的任务默认使用当前 WebView 的 UA，自定义值仅作为默认值，不覆盖扩展转交的请求头。</p>
         </Tile>
 
         <Tile icon={<Copy size={18} />} title="数据备份" desc="导出或恢复任务与设置" className="span-2">
@@ -330,22 +340,23 @@ export function SettingsView() {
           </div>
         </Tile>
 
-        <Tile icon={<Globe size={18} />} title="更新与诊断" desc="手动检查新版本，导出排错信息" className="span-2">
+        <Tile icon={<RefreshCw size={18} />} title="更新与诊断" desc="自动检查、下载、校验、安装并重启" className="span-2">
+          <div className="set-row"><span>自动更新</span><Switch label="自动更新" checked={settings.autoUpdate} onChange={v => set("autoUpdate", v)} /></div>
+          <div className="set-row"><span>GitHub 不可达时自动尝试镜像</span><Switch label="更新镜像回退" checked={settings.updateMirrors} onChange={v => set("updateMirrors", v)} /></div>
+          <p className="muted small">更新前保存任务，安装后自动恢复下载。镜像仅传输公开更新文件，安装前校验应用内置公钥与签名版本。</p>
           <div className="set-row">
-            <span className="muted small">当前版本 {__APP_VERSION__}</span>
-            <button className="btn glass" disabled={checking} onClick={async () => {
-              setChecking(true); setUpdateError(""); setUpdate(null);
+            <span className="muted small">{update ? updateLabels[update.phase] : "尚未检查"}</span>
+            <button className="btn glass" disabled={checking || updateBusy(update)} onClick={async () => {
+              setChecking(true); setUpdateError("");
               try { setUpdate(await api.checkUpdate()); } catch (e) { setUpdateError(String(e)); }
               finally { setChecking(false); }
-            }}>{checking ? "检查中…" : "检查更新"}</button>
+            }}>{checking || updateBusy(update) ? "更新中…" : "检查并更新"}</button>
           </div>
           {updateError && <p role="alert" className="err">{updateError}</p>}
           {update && <div>
-            <p>{update.available ? `发现新版本 ${update.version}` : "当前已是最新版本"}</p>
-            {update.available && <>
-              <p className="muted small" style={{ whiteSpace: "pre-wrap", maxHeight: 220, overflow: "auto", overflowWrap: "anywhere" }}>{update.notes}</p>
-              <button className="btn glass" onClick={() => api.openUrl(update.url).catch(e => showToast(String(e)))}>查看版本并下载安装包</button>
-            </>}
+            {update.error && update.error !== updateError && <p className="err" role="alert">{update.error}</p>}
+            {update.phase === "downloading" && <p className="muted small">v{update.version} · {update.source} · {bytes(update.downloaded)} / {bytes(update.total)}</p>}
+            {update.notes && <details className="update-notes"><summary>v{update.version} 更新说明</summary><ReleaseNotes text={update.notes} /></details>}
           </div>}
           <div className="set-row">
             <span className="muted small">诊断包含版本、任务状态和事件记录，不包含链接、Cookie、密码或文件名。</span>
@@ -364,7 +375,9 @@ export function SettingsView() {
           </div>
           <div>
             <div className="set-title">NDM {__APP_VERSION__}</div>
-            <div className="muted small">基于 Tauri 2 的多线程下载管理器 · 动态分段 · 断点续传</div>
+            <div className="muted small">Tauri 2 · 原生 libtorrent 2.1.1（BSD-3-Clause）</div>
+            <div className="muted small">项目许可：尚未声明 · 第三方许可随安装包附带</div>
+            <div className="muted small">{update ? updateLabels[update.phase] : "尚未检查更新"}{update?.checkedAt ? ` · ${dateTime(update.checkedAt)}` : ""}</div>
             <button className="about-link" onClick={() => api.openUrl(GITHUB_URL)}>
               <GithubMark /> github.com/fttawa/NDM
             </button>

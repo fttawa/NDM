@@ -68,6 +68,11 @@ struct Inspection {
     total: u64,
     name: String,
     version: u8,
+    file_sizes: Vec<u64>,
+    trackers: Vec<String>,
+    private: bool,
+    piece_length: u64,
+    piece_count: u32,
 }
 
 pub fn inspect(data: &[u8]) -> Result<(Source, String, u64), String> {
@@ -133,6 +138,11 @@ pub fn inspect_for(data: &[u8], version: u8) -> Result<(Source, String, u64), St
             metainfo: data.to_vec(),
             files: info.files,
             version: info.version,
+            file_sizes: info.file_sizes,
+            trackers: info.trackers,
+            private: info.private,
+            piece_length: info.piece_length,
+            piece_count: info.piece_count,
         },
         crate::util::sanitize(&info.name),
         info.total,
@@ -165,8 +175,9 @@ pub async fn run(mgr: &Arc<Manager>, id: &str, rt: &Arc<ActiveRt>) -> Result<(),
     let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
     rt.single.store(task.downloaded, Ordering::Release);
     let mut limit = mgr.torrent_engine.limit();
+    let mut bt = mgr.settings().bt;
     let config = serde_json::json!({"type":"run", "url":task.url,"metainfo":STANDARD.encode(&source.metainfo),
-        "directory":directory,"hash":source.info_hash,"version":source.version,"limit":limit});
+        "directory":directory,"hash":source.info_hash,"version":source.version,"limit":limit,"bt":bt});
     send(&mut stdin, config).await?;
     let mut stopping = false;
     let mut complete = false;
@@ -181,6 +192,11 @@ pub async fn run(mgr: &Arc<Manager>, id: &str, rt: &Arc<ActiveRt>) -> Result<(),
             }
             _ = tokio::time::sleep_until(stop_deadline), if stopping => { break Err(DlError::Cancelled); }
             _ = tick.tick() => {
+                let next_bt = mgr.settings().bt;
+                if next_bt != bt && !stopping {
+                    bt = next_bt;
+                    if let Err(error) = send(&mut stdin, serde_json::json!({"type":"configure","bt":bt})).await { break Err(error); }
+                }
                 let new_limit = mgr.torrent_engine.limit();
                 if new_limit != limit {
                     limit = new_limit;
@@ -201,6 +217,13 @@ pub async fn run(mgr: &Arc<Manager>, id: &str, rt: &Arc<ActiveRt>) -> Result<(),
                         if !stopping { if let Err(e) = send(&mut stdin, serde_json::json!({"type":"start"})).await { break Err(e); } }
                     }
                     Some("progress") => {
+                        if let Some(details) = event.get("details") {
+                            let details = match serde_json::from_value(details.clone()) {
+                                Ok(details) => details,
+                                Err(_) => break Err(DlError::Other("BT 详情数据无效".into())),
+                            };
+                            *rt.bt_details.lock() = Some(details);
+                        }
                         if event["checking"] != true { rt.single.store(event["downloaded"].as_u64().unwrap_or(0), Ordering::Release); }
                         rt.torrent_speed.store(event["speed"].as_u64().unwrap_or(0), Ordering::Release);
                         rt.conns.store(event["peers"].as_u64().unwrap_or(0).min(u32::MAX as u64) as u32, Ordering::Release);

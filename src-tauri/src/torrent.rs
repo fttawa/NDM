@@ -23,6 +23,16 @@ pub struct Source {
     pub metainfo: Vec<u8>,
     #[serde(default)]
     pub files: Vec<String>,
+    #[serde(default)]
+    pub file_sizes: Vec<u64>,
+    #[serde(default)]
+    pub trackers: Vec<String>,
+    #[serde(default)]
+    pub private: bool,
+    #[serde(default)]
+    pub piece_length: u64,
+    #[serde(default)]
+    pub piece_count: u32,
 }
 
 fn version_one() -> u8 {
@@ -98,6 +108,11 @@ pub fn magnet_source(url: &str) -> Result<(Source, String), String> {
             version,
             metainfo: vec![],
             files: vec![],
+            file_sizes: vec![],
+            trackers: vec![],
+            private: false,
+            piece_length: 0,
+            piece_count: 0,
         },
         name,
     ))

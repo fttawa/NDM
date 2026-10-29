@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "NDM 下载助手",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "拦截浏览器下载交给 NDM 多线程加速下载；支持 OpenList 当前文件夹批量下载",
   "permissions": [
     "downloads",

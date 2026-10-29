@@ -12,7 +12,7 @@ export interface AddPrefill {
 }
 
 export type Filter = "all" | "active" | "waiting" | "completed" | "paused" | "error";
-export type View = "home" | "tasks" | "settings";
+export type View = "home" | "tasks" | "settings" | "bt-settings" | "bt-detail";
 
 export const DOWNLOAD_FILTERS: { value: Filter; label: string }[] = [
   { value: "all", label: "全部下载" },
@@ -92,6 +92,7 @@ export const useStore = create<State>((set, get) => ({
   init() {
     if (initPromise) return initPromise;
     initPromise = (async () => {
+      await api.setBrowserUserAgent(navigator.userAgent);
       const [tasks, settings] = await Promise.all([api.getTasks(), api.getSettings()]);
       set({ tasks, settings });
       await api.onTasks((tasks) => {
@@ -139,7 +140,10 @@ export const useStore = create<State>((set, get) => ({
   openDownloads: (filter = "all") => set({ view: "tasks", filter, checked: [], lastChecked: null, selectedId: null }),
   openAdd: (prefill = "") => set({ addOpen: true, addPrefill: typeof prefill === "string" ? { text: prefill } : prefill }),
   closeAdd: () => set({ addOpen: false, addPrefill: { text: "" } }),
-  select: (selectedId) => set({ selectedId }),
+  select: (selectedId) => {
+    if (selectedId && get().tasks.find(t => t.id === selectedId)?.torrent) set({ selectedId, view: "bt-detail", checked: [] });
+    else set({ selectedId });
+  },
   toggleCheck(id, shift) {
     const { checked, lastChecked, tasks, filter } = get();
     const visible = filterTasks(tasks, filter).map((t) => t.id);

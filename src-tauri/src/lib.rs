@@ -1,4 +1,5 @@
 mod bridge;
+mod bt_config;
 mod capture;
 mod commands;
 mod diagnostics;
@@ -10,6 +11,8 @@ mod manager;
 mod model;
 mod storage;
 mod torrent;
+mod updater;
+mod user_agent;
 mod util;
 
 use manager::Manager;
@@ -85,6 +88,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let mgr = Manager::new(app.handle().clone())?;
             app.manage(mgr.clone());
@@ -97,6 +101,9 @@ pub fn run() {
             app.manage(capture::Captures::default());
             commands::refresh_glass(app.handle());
             mgr.start();
+            let updates = Arc::new(updater::Updates::default());
+            app.manage(updates.clone());
+            updates.start(app.handle().clone(), mgr.clone());
             build_tray(app)?;
             Ok(())
         })
@@ -119,6 +126,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_tasks,
+            commands::bt_details,
+            commands::bt_defaults,
+            commands::bt_metadata,
             commands::get_settings,
             commands::set_settings,
             commands::add_tasks,
@@ -143,6 +153,8 @@ pub fn run() {
             commands::preview_import,
             commands::export_diagnostics,
             commands::check_update,
+            commands::update_status,
+            commands::set_browser_user_agent,
             commands::effective_glass,
             capture::get_capture,
             capture::get_batch,

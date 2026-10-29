@@ -109,7 +109,9 @@ inline void validate_path(std::string const& name) {
 inline json inspect(lt::torrent_info const& ti) {
     auto const& hashes = ti.info_hashes();
     json result{{"type", "inspection"}, {"name", ti.name()}, {"version", hashes.has_v1() ? 1 : 2},
-        {"infoHash", hashes.has_v1() ? hex(hashes.v1) : hex(hashes.v2)}, {"total", 0}, {"files", json::array()}};
+        {"infoHash", hashes.has_v1() ? hex(hashes.v1) : hex(hashes.v2)}, {"total", 0}, {"files", json::array()},
+        {"fileSizes", json::array()}, {"trackers", json::array()}, {"private", ti.priv()},
+        {"pieceLength", ti.piece_length()}, {"pieceCount", ti.num_pieces()}};
     auto const& files = ti.layout(); std::set<std::wstring> names; std::uint64_t total = 0;
     for (auto index : files.file_range()) {
         auto flags = files.file_flags(index);
@@ -123,7 +125,7 @@ inline json inspect(lt::torrent_info const& ti) {
         auto size = files.file_size(index);
         if (size < 0 || std::uint64_t(size) > std::numeric_limits<std::uint64_t>::max() - total)
             throw std::runtime_error("Torrent size overflow");
-        total += size; result["files"].push_back(name);
+        total += size; result["files"].push_back(name); result["fileSizes"].push_back(size);
     }
     if (result["files"].empty()) throw std::runtime_error("Torrent has no content files");
     result["total"] = total; return result;

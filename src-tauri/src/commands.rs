@@ -17,6 +17,24 @@ pub fn get_tasks(m: M) -> Vec<Task> {
 }
 
 #[tauri::command]
+pub fn bt_details(m: M, id: String) -> Result<Option<crate::bt_config::Runtime>, String> {
+    m.bt_details(&id)
+}
+
+#[tauri::command]
+pub fn bt_defaults() -> crate::bt_config::BtSettings {
+    Default::default()
+}
+
+#[tauri::command]
+pub async fn bt_metadata(m: M<'_>, id: String) -> Result<(), String> {
+    let manager = m.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.refresh_bt_metadata(&id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub fn get_settings(m: M) -> Settings {
     m.settings()
 }
@@ -40,6 +58,10 @@ pub fn set_settings(
     }
     if s.glass != old_glass {
         refresh_glass(&app);
+    }
+    if s.auto_update && (!old.auto_update || s.update_mirrors != old.update_mirrors) {
+        app.state::<Arc<crate::updater::Updates>>()
+            .settings_changed();
     }
     Ok(s)
 }
@@ -350,57 +372,22 @@ pub fn export_diagnostics(m: M, path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn check_update(m: M<'_>) -> Result<serde_json::Value, String> {
-    let response = m
-        .client()
-        .get("https://api.github.com/repos/fttawa/NDM/releases/latest")
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "NDM-update-check")
-        .timeout(std::time::Duration::from_secs(15))
-        .send()
-        .await
-        .map_err(|_| "无法连接更新服务，请检查网络或代理".to_string())?;
-    if !response.status().is_success() {
-        return Err(format!(
-            "更新服务返回 HTTP {}，请稍后重试",
-            response.status().as_u16()
-        ));
-    }
-    let release: serde_json::Value =
-        serde_json::from_slice(&response.bytes().await.map_err(|_| "读取更新信息失败")?)
-            .map_err(|_| "更新信息格式无效")?;
-    let tag = release["tag_name"].as_str().ok_or("缺少版本号")?;
-    let newer =
-        version_tuple(tag).ok_or("版本号无效")? > version_tuple(env!("CARGO_PKG_VERSION")).unwrap();
-    Ok(
-        serde_json::json!({"version":tag,"available":newer,"notes":release["body"].as_str().unwrap_or(""),
-        "url":format!("https://github.com/fttawa/NDM/releases/tag/{tag}")}),
-    )
+pub async fn check_update(
+    app: AppHandle,
+    m: M<'_>,
+    updates: tauri::State<'_, Arc<crate::updater::Updates>>,
+) -> Result<crate::updater::Status, String> {
+    updates.run(&app, m.inner(), true).await
 }
 
-fn version_tuple(version: &str) -> Option<(u64, u64, u64)> {
-    let mut parts = version.trim_start_matches('v').split('.');
-    let value = (
-        parts.next()?.parse().ok()?,
-        parts.next()?.parse().ok()?,
-        parts.next()?.parse().ok()?,
-    );
-    if parts.next().is_some() {
-        None
-    } else {
-        Some(value)
-    }
+#[tauri::command]
+pub fn update_status(
+    updates: tauri::State<'_, Arc<crate::updater::Updates>>,
+) -> crate::updater::Status {
+    updates.status()
 }
 
-#[cfg(test)]
-mod update_tests {
-    use super::*;
-    #[test]
-    fn compares_numeric_versions() {
-        assert!(version_tuple("v0.2.10") > version_tuple("0.2.9"));
-        assert_eq!(version_tuple("v0.2.2"), version_tuple("0.2.2"));
-        assert!(version_tuple("1.2.3.4").is_none());
-        assert!(version_tuple("1.2.3-beta").is_none());
-        assert!(version_tuple("bad-version").is_none());
-    }
+#[tauri::command]
+pub fn set_browser_user_agent(m: M, value: String) -> Result<(), String> {
+    m.set_browser_user_agent(value)
 }

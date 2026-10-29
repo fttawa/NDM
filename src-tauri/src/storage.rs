@@ -206,7 +206,8 @@ impl Storage {
 
     pub fn read_bundle(path: &Path) -> Result<ExportBundle, Box<dyn std::error::Error>> {
         let data = std::fs::read(path)?;
-        let bundle: ExportBundle = serde_json::from_slice(&data)?;
+        let mut bundle: ExportBundle = serde_json::from_slice(&data)?;
+        bundle.settings.bt.validate()?;
         if !(1..=SCHEMA_VERSION).contains(&bundle.version) {
             return Err(format!("备份版本过高：{}", bundle.version).into());
         }
@@ -357,6 +358,8 @@ mod tests {
         storage.export_bundle(&file).unwrap();
         let mut bundle = Storage::read_bundle(&file).unwrap();
         bundle.settings.connections = 17;
+        bundle.settings.bt.max_peers = 139;
+        bundle.settings.bt.trackers = vec!["http://127.0.0.1:9000/announce".into()];
         let previous = ExportBundle {
             version: 2,
             settings: Settings {
@@ -371,6 +374,9 @@ mod tests {
             19
         );
         assert_eq!(storage.load_settings().unwrap().unwrap().connections, 17);
+        let restored = storage.load_settings().unwrap().unwrap();
+        assert_eq!(restored.bt.max_peers, 139);
+        assert_eq!(restored.bt.trackers, ["http://127.0.0.1:9000/announce"]);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

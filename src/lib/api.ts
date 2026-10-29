@@ -14,7 +14,7 @@ export interface Task {
   fileName: string;
   nameLocked: boolean;
   hls?: boolean;
-  torrent?: { infoHash: string; files: string[]; version?: number } | null;
+  torrent?: { infoHash: string; files: string[]; version?: number; fileSizes?: number[]; trackers?: string[]; private?: boolean; pieceLength?: number; pieceCount?: number } | null;
   saveDir: string;
   total: number | null;
   downloaded: number;
@@ -62,6 +62,38 @@ export interface Settings {
   proxyUrl: string;
   /** 连接超频：按请求延迟提前补连接，最多加开每任务连接数的一半 */
   overclock: boolean;
+  bt: BtSettings;
+  autoUpdate: boolean;
+  updateMirrors: boolean;
+}
+
+export interface BtSettings {
+  dht: boolean;
+  pex: boolean;
+  lsd: boolean;
+  upnp: boolean;
+  maxPeers: number;
+  uploadLimit: number;
+  bootstrapNodes: string[];
+  trackers: string[];
+}
+
+export interface BtRuntime {
+  phase: "metadata" | "checking" | "preparing" | "downloading";
+  peers: number;
+  seeds: number;
+  uploadSpeed: number;
+  uploaded: number;
+  dhtNodes: number;
+  pieces: number;
+  totalPieces: number;
+  fileProgress: number[];
+  dht: boolean;
+  pex: boolean;
+  private: boolean;
+  maxPeers: number;
+  uploadLimit: number;
+  trackers: { url: string; state: "working" | "announcing" | "waiting" | "error"; message: string }[];
 }
 
 /** 浏览器扩展转交的下载（需要用户确认） */
@@ -107,10 +139,14 @@ export interface HlsInfo {
 }
 
 export interface UpdateInfo {
+  phase: "idle" | "checking" | "current" | "available" | "downloading" | "verifying" | "saving" | "installing" | "error";
   version: string;
-  available: boolean;
   notes: string;
-  url: string;
+  source: string;
+  downloaded: number;
+  total: number | null;
+  checkedAt: number | null;
+  error: string;
 }
 
 export interface BridgeStatus {
@@ -161,6 +197,9 @@ const backend: Backend = isTauri ? tauriBackend : createMock();
 export const api = {
   getTasks: () => backend.call<Task[]>("get_tasks"),
   getSettings: () => backend.call<Settings>("get_settings"),
+  btDefaults: () => backend.call<BtSettings>("bt_defaults"),
+  btDetails: (id: string) => backend.call<BtRuntime | null>("bt_details", { id }),
+  btMetadata: (id: string) => backend.call<void>("bt_metadata", { id }),
   setSettings: (settings: Settings) => backend.call<Settings>("set_settings", { settings }),
   addTasks: (urls: string[], options: AddOptions) => backend.call<Task[]>("add_tasks", { urls, options }),
   inspectHls: (url: string, headers: [string, string][] = []) => backend.call<HlsInfo>("inspect_hls", { url, headers }),
@@ -185,6 +224,9 @@ export const api = {
   importData: (ticket: string) => backend.call<string>("import_data", { ticket }),
   exportDiagnostics: (path: string) => backend.call<void>("export_diagnostics", { path }),
   checkUpdate: () => backend.call<UpdateInfo>("check_update"),
+  updateStatus: () => backend.call<UpdateInfo>("update_status"),
+  onUpdate: (cb: (status: UpdateInfo) => void) => backend.on("ndm://update", cb),
+  setBrowserUserAgent: (value: string) => backend.call<void>("set_browser_user_agent", { value }),
   extensionDir: () => backend.call<string>("extension_dir"),
   getCapture: (id: string) => backend.call<CapturePayload | null>("get_capture", { id }),
   getBatch: (id: string) => backend.call<BatchPayload | null>("get_batch", { id }),
@@ -291,7 +333,9 @@ function createMock(): Backend {
     maxConcurrent: 3,
     connections: 8,
     speedLimit: 0,
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/141 Safari/537.36",
+    userAgent: "",
+    autoUpdate: true,
+    updateMirrors: true,
     notify: true,
     clipboardWatch: true,
     closeToTray: true,
@@ -302,8 +346,14 @@ function createMock(): Backend {
     overclock: true,
     proxyMode: "system",
     proxyUrl: "",
+    bt: {
+      dht: true, pex: true, lsd: false, upnp: false, maxPeers: 80, uploadLimit: 0,
+      bootstrapNodes: ["dht.libtorrent.org:25401", "router.bittorrent.com:6881", "router.utorrent.com:6881"],
+      trackers: ["udp://tracker.opentrackr.org:1337/announce", "udp://open.stealth.si:80/announce", "udp://tracker.torrent.eu.org:451/announce"],
+    },
   };
   const MB = 1024 * 1024;
+  const btDefaults = structuredClone(settings.bt);
   const mk = (name: string, total: number, status: Status, frac: number, conns = 8): Task => {
     const n = status === "completed" ? 1 : conns;
     const size = Math.floor(total / n);
@@ -422,6 +472,18 @@ function createMock(): Backend {
           return clone() as never;
         case "get_settings":
           return { ...settings } as never;
+        case "bt_defaults":
+          return structuredClone(btDefaults) as never;
+        case "bt_details": {
+          const task = tasks.find(t => t.id === a.id);
+          if (!task?.torrent || task.status !== "active") return null as never;
+          return {
+            phase: "downloading", peers: 12, seeds: 3, uploadSpeed: 48 * 1024, uploaded: 8 * MB,
+            dhtNodes: settings.bt.dht ? 143 : 0, pieces: 110, totalPieces: 256, fileProgress: task.torrent.files.map((_, i) => Math.round((task.torrent?.fileSizes?.[i] ?? 0) * .42)),
+            dht: settings.bt.dht, pex: settings.bt.pex, private: false, maxPeers: settings.bt.maxPeers, uploadLimit: settings.bt.uploadLimit,
+            trackers: settings.bt.trackers.map(url => ({url, state: "working", message: ""})),
+          } as never;
+        }
         case "set_settings":
           settings = a.settings;
           return settings as never;
@@ -511,7 +573,8 @@ function createMock(): Backend {
         case "bridge_status":
           return { running: settings.browserIntegration, port: 16800, error: null } as never;
         case "check_update":
-          return { version: __APP_VERSION__, available: false, notes: "预览模式", url: "https://github.com/fttawa/NDM/releases" } as never;
+        case "update_status":
+          return { phase: cmd === "check_update" ? "current" : "idle", version: __APP_VERSION__, notes: "", source: "GitHub", downloaded: 0, total: null, checkedAt: cmd === "check_update" ? Date.now() : null, error: "" } as never;
         case "extension_dir":
           return "E:\NDM\extension" as never;
         case "test_proxy":
