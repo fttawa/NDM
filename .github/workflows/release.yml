@@ -55,13 +55,32 @@ jobs:
           releaseDraft: true
           prerelease: false
           uploadUpdaterJson: true
+          uploadUpdaterSignatures: true
+          updaterJsonPreferNsis: true
 
       - name: Publish signed release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release view ${{ github.ref_name }} --json assets --jq '.assets[].name' | Set-Content release-assets.txt
-          $assets = Get-Content release-assets.txt
-          if (-not ($assets -contains 'latest.json') -or -not ($assets -match '\.sig$')) { throw 'Signed updater artifacts are missing' }
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ("v$version" -ne '${{ github.ref_name }}') { throw 'Release tag does not match app version' }
+          $installer = "NDM_${version}_x64-setup.exe"
+          $release = gh release view ${{ github.ref_name }} --json assets | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to read release assets' }
+          foreach ($name in @($installer, "$installer.sig", 'latest.json')) {
+            if ($name -notin $release.assets.name) { throw "Missing release asset: $name" }
+          }
+          gh release download ${{ github.ref_name }} --pattern latest.json --pattern "$installer.sig" --dir release-verification
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to download updater metadata' }
+          $manifest = Get-Content release-verification/latest.json -Raw | ConvertFrom-Json
+          if ($manifest.version -ne $version) { throw 'Updater manifest version mismatch' }
+          $signature = (Get-Content "release-verification/$installer.sig" -Raw).Trim()
+          $asset = $release.assets | Where-Object name -eq $installer
+          $assetId = ($asset.apiUrl -split '/')[-1]
+          $allowedUrls = @($asset.url, "https://github.com/repos/fttawa/NDM/releases/assets/$assetId", "https://api.github.com/repos/fttawa/NDM/releases/assets/$assetId")
+          foreach ($platform in @('windows-x86_64', 'windows-x86_64-nsis')) {
+            $entry = $manifest.platforms.$platform
+            if (-not $entry -or $entry.signature.Trim() -ne $signature -or $entry.url -notin $allowedUrls) { throw "Invalid updater entry: $platform" }
+          }
           gh release edit ${{ github.ref_name }} --draft=false --latest --notes-file RELEASE_NOTES.md
           if ($LASTEXITCODE -ne 0) { throw 'Failed to publish release' }

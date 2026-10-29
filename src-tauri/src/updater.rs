@@ -61,19 +61,42 @@ fn routes(url: &str, mirrors: bool) -> Vec<(String, String)> {
     result
 }
 
-fn validate_asset(update: &Update) -> Result<(), String> {
-    validate_asset_url(update.download_url.as_str(), &update.version)
+fn validate_asset(update: &mut Update) -> Result<(), String> {
+    let url = normalize_asset_url(update.download_url.as_str(), &update.version)?;
+    update.download_url = url.parse().map_err(|_| "更新包地址无效")?;
+    Ok(())
 }
 
-fn validate_asset_url(url: &str, version: &str) -> Result<(), String> {
+fn normalize_asset_url(url: &str, version: &str) -> Result<String, String> {
     let expected = format!(
         "https://github.com/fttawa/NDM/releases/download/v{}/NDM_{}_x64-setup.exe",
         version, version
     );
-    if url != expected {
-        return Err("更新包地址与版本不匹配，已拒绝安装".into());
+    if url == expected {
+        return Ok(expected);
     }
-    Ok(())
+
+    // tauri-action can emit a GitHub release-asset API URL in latest.json.
+    // Resolve only this repository's numeric asset IDs to the known installer
+    // path; the updater still verifies the signed package before installation.
+    let parsed = reqwest::Url::parse(url).map_err(|_| "更新包地址无效")?;
+    let path = parsed.path();
+    let asset_id = path
+        .strip_prefix("/repos/fttawa/NDM/releases/assets/")
+        .filter(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()));
+    let trusted_api_host = matches!(parsed.host_str(), Some("github.com" | "api.github.com"));
+    if parsed.scheme() == "https"
+        && trusted_api_host
+        && parsed.username().is_empty()
+        && parsed.password().is_none()
+        && parsed.port().is_none()
+        && parsed.query().is_none()
+        && parsed.fragment().is_none()
+        && asset_id.is_some()
+    {
+        return Ok(expected);
+    }
+    Err("更新包地址与版本不匹配，已拒绝安装".into())
 }
 
 impl Updates {
@@ -196,7 +219,7 @@ impl Updates {
             }
         }
         let mut update = found.ok_or("更新服务暂不可达，已尝试可用线路，稍后将自动重试")?;
-        validate_asset(&update)?;
+        validate_asset(&mut update)?;
         self.change(app, |s| {
             s.version = update.version.clone();
             s.notes = update.body.clone().unwrap_or_default();
@@ -274,14 +297,27 @@ mod tests {
         assert_eq!(result[1].1, format!("https://ghfast.top/{url}"));
         assert_eq!(result.len(), 3);
         assert_eq!(routes(url, false).len(), 1);
-        assert!(validate_asset_url(url, "1.2.3").is_ok());
+        assert_eq!(normalize_asset_url(url, "1.2.3").unwrap(), url);
+        for api_url in [
+            "https://github.com/repos/fttawa/NDM/releases/assets/123456789",
+            "https://api.github.com/repos/fttawa/NDM/releases/assets/123456789",
+        ] {
+            let normalized = normalize_asset_url(api_url, "1.2.3").unwrap();
+            assert_eq!(normalized, url);
+            let mirror_routes = routes(&normalized, true);
+            assert_eq!(mirror_routes[1].1, format!("https://ghfast.top/{url}"));
+        }
         for bad in [
             "https://evil.invalid/app.exe",
             "https://github.com/other/NDM/releases/download/v1.2.3/NDM_1.2.3_x64-setup.exe",
             "http://github.com/fttawa/NDM/releases/download/v1.2.3/NDM_1.2.3_x64-setup.exe",
+            "https://github.com/repos/other/NDM/releases/assets/123456789",
+            "https://github.com/repos/fttawa/NDM/releases/assets/not-a-number",
+            "https://github.com/repos/fttawa/NDM/releases/assets/123456789?redirect=evil.invalid",
+            "https://github.com.evil.invalid/repos/fttawa/NDM/releases/assets/123456789",
         ] {
-            assert!(validate_asset_url(bad, "1.2.3").is_err());
+            assert!(normalize_asset_url(bad, "1.2.3").is_err());
         }
-        assert!(validate_asset_url(url, "1.2.4").is_err());
+        assert!(normalize_asset_url(url, "1.2.4").is_err());
     }
 }
