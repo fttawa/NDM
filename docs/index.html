@@ -222,6 +222,9 @@
   .log-item ul { margin: 0; padding-left: 18px; color: var(--text-2); font-size: 15px; }
   .log-item li + li { margin-top: 4px; }
   .latest { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 6px; background: var(--accent); color: var(--on-accent); margin-left: 6px; vertical-align: 3px; }
+  .history-log { padding-bottom: 20px; }
+  .log-history .history-close, .log-history[open] .history-open { display: none; }
+  .log-history[open] .history-close { display: inline; }
 
   /* 常见问题 */
   .faq { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
@@ -515,30 +518,35 @@
           <div class="v">v0.3.0<span class="latest">最新</span><small>2026-10-29</small></div>
           <ul><li>新增磁力链接与 .torrent 文件下载，支持 BTv1、BTv2 和混合种子</li><li>BT 任务接入队列、限速、暂停续传与重启校验，元数据随 SQLite 备份保存</li><li>内置原生 C++ libtorrent 内核，无需 Python 运行时；Windows 安装包约 5.13 MiB</li></ul>
         </div>
-        <div class="log-item glass">
-          <div class="v">v0.2.5<small>2026-10-28</small></div>
-          <ul><li>浏览器扩展支持当前页面视频嗅探，一键转交下载</li><li>新增 m3u8 / HLS 点播下载，解析清晰度并合并 TS、fMP4 分片</li><li>更新扩展后请重新加载并允许新增权限；HLS 暂停后继续会从头下载</li></ul>
-        </div>
-        <div class="log-item glass">
-          <div class="v">v0.2.4<small>2026-10-26</small></div>
-          <ul><li>侧边栏精简为首页、下载、设置三项</li><li>独立的下载管理页，按状态筛选任务</li></ul>
-        </div>
-        <div class="log-item glass">
-          <div class="v">v0.2.3<small>2026-10-25</small></div>
-          <ul><li>增强备份恢复：导入前预览变更，并自动备份当前数据</li><li>导出诊断信息（只含状态与数字，不含链接和文件名）</li><li>设置页检查更新</li></ul>
-        </div>
-        <div class="log-item glass">
-          <div class="v">v0.2.2<small>2026-10-25</small></div>
-          <ul><li>任务与设置迁移到 SQLite，旧版 JSON 自动迁移</li><li>数据库完整性检查，损坏时自动备份重建</li><li>浏览器扩展接口增加随机口令鉴权</li><li>修复并发、续传与文件名冲突等稳定性问题</li></ul>
-        </div>
-        <div class="log-item glass">
-          <div class="v">v0.2.1<small>2026-10-25</small></div>
-          <ul><li>连接超频：按实测延迟提前补连接，最多加开一半</li><li>显示超频连接数与请求延迟</li></ul>
-        </div>
-        <div class="log-item glass">
-          <div class="v">v0.2.0<small>2026-10-24</small></div>
-          <ul><li>首个公开版本：多连接分段、动态分段、断点续传、浏览器扩展、OpenList 整目录下载</li></ul>
-        </div>
+        <details class="log-history glass">
+          <summary><span class="history-open">查看历史版本</span><span class="history-close">收起历史版本</span></summary>
+          <div class="log history-log">
+            <div class="log-item glass">
+              <div class="v">v0.2.5<small>2026-10-28</small></div>
+              <ul><li>浏览器扩展支持当前页面视频嗅探，一键转交下载</li><li>新增 m3u8 / HLS 点播下载，解析清晰度并合并 TS、fMP4 分片</li><li>更新扩展后请重新加载并允许新增权限；HLS 暂停后继续会从头下载</li></ul>
+            </div>
+            <div class="log-item glass">
+              <div class="v">v0.2.4<small>2026-10-26</small></div>
+              <ul><li>侧边栏精简为首页、下载、设置三项</li><li>独立的下载管理页，按状态筛选任务</li></ul>
+            </div>
+            <div class="log-item glass">
+              <div class="v">v0.2.3<small>2026-10-25</small></div>
+              <ul><li>增强备份恢复：导入前预览变更，并自动备份当前数据</li><li>导出诊断信息（只含状态与数字，不含链接和文件名）</li><li>设置页检查更新</li></ul>
+            </div>
+            <div class="log-item glass">
+              <div class="v">v0.2.2<small>2026-10-25</small></div>
+              <ul><li>任务与设置迁移到 SQLite，旧版 JSON 自动迁移</li><li>数据库完整性检查，损坏时自动备份重建</li><li>浏览器扩展接口增加随机口令鉴权</li><li>修复并发、续传与文件名冲突等稳定性问题</li></ul>
+            </div>
+            <div class="log-item glass">
+              <div class="v">v0.2.1<small>2026-10-25</small></div>
+              <ul><li>连接超频：按实测延迟提前补连接，最多加开一半</li><li>显示超频连接数与请求延迟</li></ul>
+            </div>
+            <div class="log-item glass">
+              <div class="v">v0.2.0<small>2026-10-24</small></div>
+              <ul><li>首个公开版本：多连接分段、动态分段、断点续传、浏览器扩展、OpenList 整目录下载</li></ul>
+            </div>
+          </div>
+        </details>
       </div>
     </div>
   </section>
@@ -683,7 +691,7 @@
 
     // ---------- 滚动渐入 + 数字滚动 ----------
     if (!reduce && "IntersectionObserver" in window) {
-      const groups = [".stats .stat", ".sec-head", ".race", ".how .card", ".bento .tile", ".steps .step", ".ext-demo", ".log-item", ".faq details", ".final"];
+      const groups = [".stats .stat", ".sec-head", ".race", ".how .card", ".bento .tile", ".steps .step", ".ext-demo", ".log:not(.history-log) > .log-item", ".log-history", ".faq details", ".final"];
       const items = [];
       for (const sel of groups) {
         // 同一组内依次延迟，形成错落的入场
