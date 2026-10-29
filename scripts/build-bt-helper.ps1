@@ -90,7 +90,10 @@ if (-not (Test-Path -LiteralPath $taskJSON)) {
 if ((Get-SourceHash $taskJSON) -ne 'aaf127c04cb31c406e5b04a63f1ae89369fccde6d8fa7cdda1ed4f32dfc5de63') { throw 'JSON header checksum mismatch' }
 
 $taskBuild = Join-Path $taskCache 'build'
-& cmake -S (Join-Path $taskRoot 'native/bt') -B $taskBuild -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_POLICY_DEFAULT_CMP0144=NEW "-DNDM_LIBTORRENT_SOURCE=$taskLT" "-DBOOST_ROOT=$(Join-Path $taskCache 'boost_1_88_0')" "-DOPENSSL_ROOT_DIR=$taskSSLInstall" "-DNDM_JSON_INCLUDE=$(Join-Path $taskCache 'json')"
+# Strawberry Perl also ships GCC. Select MSVC explicitly so CMake does not
+# choose that compiler ahead of the Visual Studio environment on clean runners.
+$taskCompiler = (Get-Command cl.exe -ErrorAction Stop).Source.Replace('\', '/')
+& cmake -S (Join-Path $taskRoot 'native/bt') -B $taskBuild -G Ninja "-DCMAKE_C_COMPILER=$taskCompiler" "-DCMAKE_CXX_COMPILER=$taskCompiler" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_POLICY_DEFAULT_CMP0144=NEW "-DNDM_LIBTORRENT_SOURCE=$taskLT" "-DBOOST_ROOT=$(Join-Path $taskCache 'boost_1_88_0')" "-DOPENSSL_ROOT_DIR=$taskSSLInstall" "-DNDM_JSON_INCLUDE=$(Join-Path $taskCache 'json')"
 if ($LASTEXITCODE -ne 0) { throw 'Native BT configuration failed' }
 Write-Output 'Compiling native BT engine (see .native-build/native-build.log)...'
 Invoke-LoggedBuild 'cmake' @('--build', $taskBuild, '--target', 'ndm-bt-engine', 'ndm-bt-fixture', '--parallel', '4') (Join-Path $taskCache 'native-build.log')
