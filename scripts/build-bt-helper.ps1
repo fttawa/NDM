@@ -14,6 +14,17 @@ function Get-SourceHash($Path) {
     }
 }
 
+function Invoke-LoggedBuild($Program, $Arguments, $LogPath) {
+    # Windows PowerShell converts redirected native stderr into ErrorRecords.
+    # Keep diagnostics in the log and use the process exit code to detect failure.
+    $ErrorActionPreference = 'Continue'
+    & $Program @Arguments *> $LogPath
+    if ($LASTEXITCODE -ne 0) {
+        Get-Content -LiteralPath $LogPath -Tail 60
+        throw "Native build failed ($Program, exit $LASTEXITCODE). See $LogPath"
+    }
+}
+
 function Get-SourceArchive($Name, $Url, $Sha256) {
     $archive = Join-Path $taskCache $Name
     if (-not (Test-Path -LiteralPath $archive)) {
@@ -56,10 +67,8 @@ if (-not (Test-Path (Join-Path $taskSSLInstall 'lib/libssl.lib'))) {
         Write-Output 'Building static OpenSSL (first build only)...'
         & perl Configure VC-WIN64A no-shared no-tests no-docs no-apps no-legacy no-module no-comp "--prefix=$($taskSSLInstall.Replace('\','/'))" "--openssldir=$($taskSSLInstall.Replace('\','/'))/ssl" /Os
         if ($LASTEXITCODE -ne 0) { throw 'OpenSSL configure failed' }
-        & nmake /NOLOGO *> (Join-Path $taskCache 'openssl-build.log')
-        if ($LASTEXITCODE -ne 0) { Get-Content (Join-Path $taskCache 'openssl-build.log') -Tail 35; throw 'OpenSSL build failed' }
-        & nmake /NOLOGO install_sw *> (Join-Path $taskCache 'openssl-install.log')
-        if ($LASTEXITCODE -ne 0) { throw 'OpenSSL installation failed' }
+        Invoke-LoggedBuild 'nmake' @('/NOLOGO') (Join-Path $taskCache 'openssl-build.log')
+        Invoke-LoggedBuild 'nmake' @('/NOLOGO', 'install_sw') (Join-Path $taskCache 'openssl-install.log')
     } finally { Pop-Location }
 }
 
@@ -84,8 +93,7 @@ $taskBuild = Join-Path $taskCache 'build'
 & cmake -S (Join-Path $taskRoot 'native/bt') -B $taskBuild -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_POLICY_DEFAULT_CMP0144=NEW "-DNDM_LIBTORRENT_SOURCE=$taskLT" "-DBOOST_ROOT=$(Join-Path $taskCache 'boost_1_88_0')" "-DOPENSSL_ROOT_DIR=$taskSSLInstall" "-DNDM_JSON_INCLUDE=$(Join-Path $taskCache 'json')"
 if ($LASTEXITCODE -ne 0) { throw 'Native BT configuration failed' }
 Write-Output 'Compiling native BT engine (see .native-build/native-build.log)...'
-& cmake --build $taskBuild --target ndm-bt-engine ndm-bt-fixture --parallel 4 *> (Join-Path $taskCache 'native-build.log')
-if ($LASTEXITCODE -ne 0) { Get-Content (Join-Path $taskCache 'native-build.log') -Tail 60; throw 'Native BT build failed' }
+Invoke-LoggedBuild 'cmake' @('--build', $taskBuild, '--target', 'ndm-bt-engine', 'ndm-bt-fixture', '--parallel', '4') (Join-Path $taskCache 'native-build.log')
 $taskOut = Join-Path $taskRoot 'src-tauri/bt-helper/native'
 New-Item -ItemType Directory -Path $taskOut -Force | Out-Null
 $taskBuiltEngine = Join-Path $taskBuild 'bin/ndm-bt-engine.exe'
