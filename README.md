@@ -17,7 +17,7 @@
 
 官网：https://fttawa.github.io/NDM/
 
-NDM 是一个基于 Tauri 2 + Rust 的多线程下载管理器，目标是成为 IDM 的开源替代品。界面参考 Motrix，采用 Bento Grid 布局、深色中性灰与毛玻璃材质；安装包只有约 2 MB。
+NDM 是一个基于 Tauri 2 + Rust 的多线程下载管理器，目标是成为 IDM 的开源替代品。界面参考 Motrix，采用 Bento Grid 布局、深色中性灰与毛玻璃材质，支持 HTTP、HLS 与 BT 下载。
 
 <p align="center">
   <img src="docs/screenshot.png" alt="NDM 主界面" width="100%" />
@@ -37,6 +37,7 @@ NDM 是一个基于 Tauri 2 + Rust 的多线程下载管理器，目标是成为
 | **OpenList / AList** | 一键爬取当前文件夹（可含子文件夹），勾选后批量下载，保留目录结构与真实文件名 |
 | **批量管理** | 复选框多选，Shift 连选、Ctrl+A 全选，批量开始 / 暂停 / 重新下载 / 删除 |
 | **网络** | 全局限速、并发队列、系统代理 / 手动 HTTP · SOCKS5 代理 |
+| **磁力与 BT** | BTv1、BTv2 和混合种子；内置原生 libtorrent 内核，支持校验与恢复 |
 | **桌面体验** | 系统托盘、完成通知、剪贴板监听、亚克力 / 云母窗口材质 |
 
 ## 📦 安装
@@ -61,6 +62,8 @@ NDM 是一个基于 Tauri 2 + Rust 的多线程下载管理器，目标是成为
 
 ## 🛠️ 开发
 
+需要 Node.js / pnpm、Rust、Visual Studio C++ Build Tools / Windows SDK，以及 CMake、Ninja、Perl 和 NASM。Perl / NASM 仅用于编译静态 OpenSSL。`tauri dev` 和 `tauri build` 会自动下载并校验固定版本的原生依赖，首次构建较慢，后续复用 `.native-build/` 缓存。整个构建与运行流程不使用 Python。
+
 ```bash
 pnpm install
 pnpm tauri dev
@@ -73,7 +76,7 @@ pnpm tauri dev
 | `NDM_DATA_DIR` | 使用独立数据目录，同时跳过单实例限制，便于与已安装的 NDM 并行测试 |
 | `NDM_BRIDGE_PORT` | 更换扩展接入端口（默认 16800） |
 
-测试：`cargo test`（在 `src-tauri/` 下，下载引擎分段逻辑）、`node extension/rules.test.mjs`（扩展拦截规则）。
+测试前先运行 `pnpm build:bt-helper`。随后运行 `cargo test`（在 `src-tauri/` 下，下载引擎与 BT 元数据 / 路径校验）、`node scripts/test-bt-engine.mjs`（原生内核的 BTv1 / BTv2 / 混合种子本机传输测试）、`node extension/rules.test.mjs`（扩展拦截规则）。
 
 ### 打包
 
@@ -88,6 +91,8 @@ pnpm tauri build
 ```
 src/            React 19 前端（zustand、lucide-react）
 src-tauri/      Rust 后端：下载引擎、任务管理、扩展桥接、确认卡片窗口
+native/bt/      原生 C++ libtorrent 桥接程序与仅供测试的本机做种端
+scripts/        原生内核构建脚本与 BT 传输测试
 extension/      Chrome / Edge 扩展（MV3）
 docs/           官网（GitHub Pages）与 README 图片，头图源文件在 docs/banner/
 ```
@@ -115,3 +120,15 @@ docs/           官网（GitHub Pages）与 README 图片，头图源文件在 d
 - HLS 暂停后继续会从头下载，传输期间显示已下载字节，结束后确定最终大小。直播、AES-128 / SAMPLE-AES / DRM、独立音视频轨、时间线切换和初始化分片切换会报告暂不支持，不生成成功文件。
 
 验证命令：`node --test extension/media.test.mjs extension/sniffer.test.mjs`、`cargo test --manifest-path src-tauri/Cargo.toml hls::tests`。测试使用仓库内的三秒合成音视频样本与本地 HTTP 服务，不访问外部视频站点。
+
+## 磁力与 BT 种子下载
+
+- BTv1、BTv2 与混合种子统一使用原生 C++ libtorrent 2.1.1。内核及 OpenSSL 静态链接为一个程序，作为隐藏子进程运行，通过私有标准输入 / 输出通信，任务停止或主程序关闭后退出，无需额外客户端或语言运行时。
+- 新建任务可粘贴 `magnet:?xt=urn:btih:…` 或纯 BTv2 的 `magnet:?xt=urn:btmh:1220…`（SHA-256，支持批量），或点击「打开种子文件」选择本地 `.torrent`，下载种子包含的全部文件。
+- 支持 BTv1、BTv2 与混合种子，种子文件限制 16 MiB；磁力元数据解析超时后可重试。磁力可通过 DHT 和自带 Tracker 寻找 Peer，资源无在线 Peer 时需要等待。
+- 每个任务使用独立内容文件夹，任务卡显示 BT 标识、Peer 数和下载进度，详情可查看 Info Hash 与文件列表。元数据保存在 SQLite 和完整备份中，原始 `.torrent` 移动或删除后仍可续传。
+- 与其他下载共用队列、暂停/继续、失败重试和完成通知。继续或重启时重新校验已有分片，修复损坏内容；显式「重新下载」使用新目录并保留旧内容。下载期间遵循 BT 协议上传已取得的分片，完成后停止连接与做种。
+- BT Peer、DHT 与 Tracker 当前直接联网，不复用 HTTP / HLS 代理。HTTP / HLS 与 BT 按活跃任务数分配设置中的限速额度，各 BT 任务可动态调整限速，不再要求 16 KiB/s 最低配额。
+- 删除任务默认保留内容；勾选删除文件时仅删除种子列出的文件和空目录，保留额外放入的文件。重复 Info Hash 会提示使用已有任务；不安全的文件名和符号链接路径会被拒绝。
+
+验证：先运行 `pnpm build:bt-helper`，再运行 `cargo test --manifest-path src-tauri/Cargo.toml torrent::tests` 与 `node scripts/test-bt-engine.mjs`，使用本机真实做种端与下载端，验证 BTv1 / BTv2 / 混合种子的磁力元数据解析、多文件传输、暂停取消、重启后校验修复与删除文件边界，不访问公网资源。测试可传入 `--helper 路径` 验证安装包解压出的内核。内核依赖的许可随安装包保存在 `licenses/`。

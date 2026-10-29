@@ -866,6 +866,7 @@ button {
 .drawer.show {
   transform: none;
 }
+.drawer > * { flex-shrink: 0; }
 .drawer-head {
   display: flex;
   gap: 14px;

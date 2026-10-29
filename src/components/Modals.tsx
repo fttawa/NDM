@@ -1,6 +1,6 @@
 import { FolderOpen, Globe, Link2, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, pickDirectory, type HlsInfo } from "../lib/api";
+import { api, pickDirectory, pickTorrentFile, type HlsInfo } from "../lib/api";
 import { bytes, extractUrls } from "../lib/format";
 import { useStore } from "../store";
 import { Slider, Switch } from "./ui";
@@ -42,6 +42,7 @@ export function AddTaskModal() {
   const [start, setStart] = useState(true);
   const [busy, setBusy] = useState(false);
   const [hls, setHls] = useState(false);
+  const [torrentPath, setTorrentPath] = useState("");
   const [hlsInfo, setHlsInfo] = useState<HlsInfo | null>(null);
   const [hlsVariant, setHlsVariant] = useState("");
   const [hlsError, setHlsError] = useState("");
@@ -62,14 +63,16 @@ export function AddTaskModal() {
       setConns(s?.connections ?? 8);
       setStart(true);
       setHls(!!prefill.hls);
+      setTorrentPath("");
       // 拦截的下载直接聚焦「开始下载」，按回车即可确认
       setTimeout(() => (prefill.headers ? startRef.current : ref.current)?.focus(), 30);
     }
   }, [open, prefill]);
 
   const urls = useMemo(() => extractUrls(text), [text]);
+  const btMode = !!torrentPath || urls.some(url => url.toLowerCase().startsWith("magnet:"));
   const autoHls = urls.length === 1 && (() => { try { return new URL(urls[0]).pathname.toLowerCase().endsWith(".m3u8"); } catch { return false; } })();
-  const hlsMode = urls.length === 1 && (hls || autoHls);
+  const hlsMode = !btMode && urls.length === 1 && (hls || autoHls);
 
   useEffect(() => {
     inspectSequence.current++;
@@ -87,23 +90,25 @@ export function AddTaskModal() {
   };
 
   const submit = async () => {
-    if (!urls.length || busy || inspecting) return;
+    if ((!urls.length && !torrentPath) || busy || inspecting) return;
     setBusy(true);
     try {
       const target = hlsMode && hlsVariant ? hlsVariant : urls[0];
       const headers = hlsMode && new URL(target).origin !== new URL(urls[0]).origin
         ? prefill.headers?.filter(([name]) => !["cookie", "authorization", "origin"].includes(name.toLowerCase()))
         : prefill.headers;
-      await api.addTasks(hlsMode ? [target] : urls, {
+      const options = {
         saveDir: dir,
-        fileName: urls.length === 1 ? name : undefined,
+        fileName: torrentPath || urls.length === 1 ? name : undefined,
         connections: conns,
         start,
         headers,
         hls: hlsMode,
-      });
+      };
+      if (torrentPath) await api.addTorrentFile(torrentPath, options);
+      else await api.addTasks(hlsMode ? [target] : urls, options);
       useStore.getState().openDownloads();
-      showToast(`已添加 ${urls.length} 个任务`);
+      showToast(`已添加 ${torrentPath ? 1 : urls.length} 个任务`);
       close();
     } catch (e) {
       showToast(String(e));
@@ -121,7 +126,7 @@ export function AddTaskModal() {
           <p className="muted ellipsis">
             {captured
               ? [hostOf(prefill.referrer || prefill.text), prefill.fileSize ? bytes(prefill.fileSize) : null].filter(Boolean).join(" · ")
-              : "每行一个链接，支持一次粘贴多个"}
+              : "粘贴下载链接、磁力链接，或打开种子文件"}
           </p>
         </div>
         <button className="icon-btn ghost" onClick={close} aria-label="关闭">
@@ -129,12 +134,19 @@ export function AddTaskModal() {
         </button>
       </div>
 
-      <div className="field">
+      {!captured && <div className="field">
+        <button className="btn glass" disabled={busy} onClick={async () => {
+          try { const path = await pickTorrentFile(); if (path) { setTorrentPath(path); setText(""); setName(""); } }
+          catch (error) { showToast(String(error)); }
+        }}><FolderOpen size={15} /> 打开种子文件</button>
+        {torrentPath && <div className="set-row"><span className="muted small ellipsis" title={torrentPath}>{torrentPath.split(/[\\/]/).pop()}</span><button className="icon-btn ghost" aria-label="移除种子文件" onClick={() => setTorrentPath("")}><X size={14} /></button></div>}
+      </div>}
+      {!torrentPath && <div className="field">
         <textarea
           ref={ref}
           className="input mono"
           rows={captured ? 2 : 5}
-          placeholder="https://example.com/file.zip"
+          placeholder={"https://example.com/file.zip\nmagnet:?xt=urn:btih:…"}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
@@ -142,9 +154,10 @@ export function AddTaskModal() {
           }}
         />
         <div className="field-hint">{urls.length ? `识别到 ${urls.length} 个链接` : "未识别到链接"}</div>
-      </div>
+      </div>}
 
-      {urls.length === 1 && <div className="field hls-options">
+      {btMode && <p className="muted small field">BT 内容保存到独立文件夹，支持分片校验和续传，完成后自动停止做种。Peer 连接直连，不使用 HTTP 代理。</p>}
+      {!btMode && urls.length === 1 && <div className="field hls-options">
         <label className="set-row"><span>HLS / m3u8 视频</span>{autoHls ? <span className="pill">已识别</span> : <Switch checked={hlsMode} onChange={setHls} />}</label>
         {hlsMode && <>
           <div className="set-row"><span className="muted small">默认选择最高可用清晰度</span><button className="btn glass" disabled={inspecting || busy} onClick={inspect}>{inspecting ? "解析中…" : "解析清晰度"}</button></div>
@@ -176,11 +189,11 @@ export function AddTaskModal() {
         </div>
         {urls.length <= 1 && (
           <div className="field span-2">
-            <label>文件名（可选）</label>
+            <label>{btMode ? "任务文件夹名（可选）" : "文件名（可选）"}</label>
             <input className="input" placeholder="留空则自动识别" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
         )}
-        {!hlsMode && <div className="field">
+        {!hlsMode && !btMode && <div className="field">
           <label>
             连接数 <b>{conns}</b>
           </label>
@@ -197,7 +210,7 @@ export function AddTaskModal() {
         <button className="btn glass" onClick={close}>
           取消
         </button>
-        <button ref={startRef} className="btn primary" disabled={!urls.length || busy || inspecting} onClick={submit}>
+        <button ref={startRef} className="btn primary" disabled={(!urls.length && !torrentPath) || busy || inspecting} onClick={submit}>
           开始下载
         </button>
       </div>

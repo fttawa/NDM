@@ -4,3 +4,8 @@ src-tauri/target
 src-tauri/gen
 .claude/
 *.log
+.bt-build/
+.native-build/
+src-tauri/bt-helper/*
+!src-tauri/bt-helper/.gitkeep
+scripts/__pycache__/

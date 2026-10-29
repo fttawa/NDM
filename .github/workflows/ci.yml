@@ -29,6 +29,15 @@ jobs:
       - name: Frontend build
         run: pnpm build
 
+      - name: Native build tools
+        run: choco install nasm strawberryperl ninja --no-progress -y
+
+      - name: Build native libtorrent engine
+        run: pnpm build:bt-helper
+
+      - name: BTv1 / BTv2 / hybrid local swarm tests
+        run: node scripts/test-bt-engine.mjs
+
       - name: Extension tests
         run: |
           node extension/rules.test.mjs

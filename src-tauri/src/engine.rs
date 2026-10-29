@@ -121,6 +121,7 @@ pub struct ActiveRt {
     pub segs: Mutex<Vec<Arc<SegRt>>>,
     pub segmented: AtomicBool,
     pub single: AtomicU64,
+    pub torrent_speed: AtomicU64,
     /// 已建立（连接中 + 传输中）的连接数
     pub conns: AtomicU32,
     /// 已收到响应、正在传输数据的连接数
@@ -140,6 +141,7 @@ impl ActiveRt {
             segs: Mutex::new(Vec::new()),
             segmented: AtomicBool::new(false),
             single: AtomicU64::new(0),
+            torrent_speed: AtomicU64::new(0),
             conns: AtomicU32::new(0),
             streaming: AtomicU32::new(0),
             workers: AtomicU32::new(0),
@@ -463,6 +465,9 @@ fn plan_segments(total: u64, conns: u32) -> Vec<Segment> {
 
 /// 下载入口：分段模式失败于 NoRange 时自动降级为单连接
 pub async fn run(mgr: Arc<Manager>, id: String, rt: Arc<ActiveRt>) -> Result<(), DlError> {
+    if mgr.task(&id).is_some_and(|task| task.torrent.is_some()) {
+        return crate::torrent::run(&mgr, &id, &rt).await;
+    }
     if mgr.task(&id).is_some_and(|task| task.hls) {
         return crate::hls::run(&mgr, &id, &rt).await;
     }

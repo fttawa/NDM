@@ -18,7 +18,9 @@ impl Limiter {
     }
 
     pub fn set_rate(&self, rate: u64) {
-        self.rate.store(rate, Ordering::Relaxed);
+        if self.rate.swap(rate, Ordering::Relaxed) == rate {
+            return;
+        }
         *self.state.lock() = (rate as f64, Instant::now());
     }
 

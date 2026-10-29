@@ -14,6 +14,7 @@ export interface Task {
   fileName: string;
   nameLocked: boolean;
   hls?: boolean;
+  torrent?: { infoHash: string; files: string[]; version?: number } | null;
   saveDir: string;
   total: number | null;
   downloaded: number;
@@ -163,6 +164,7 @@ export const api = {
   setSettings: (settings: Settings) => backend.call<Settings>("set_settings", { settings }),
   addTasks: (urls: string[], options: AddOptions) => backend.call<Task[]>("add_tasks", { urls, options }),
   inspectHls: (url: string, headers: [string, string][] = []) => backend.call<HlsInfo>("inspect_hls", { url, headers }),
+  addTorrentFile: (path: string, options: AddOptions) => backend.call<Task[]>("add_torrent_file", { path, options }),
   pause: (ids: string[]) => backend.call<void>("pause_tasks", { ids }),
   resume: (ids: string[]) => backend.call<void>("resume_tasks", { ids }),
   remove: (ids: string[], deleteFile: boolean) => backend.call<void>("remove_tasks", { ids, deleteFile }),
@@ -199,6 +201,13 @@ export async function pickDirectory(defaultPath?: string): Promise<string | null
   const { open } = await import("@tauri-apps/plugin-dialog");
   const r = await open({ directory: true, defaultPath });
   return typeof r === "string" ? r : null;
+}
+
+export async function pickTorrentFile(): Promise<string | null> {
+  if (!isTauri) return null;
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const result = await open({ multiple: false, filters: [{ name: "BitTorrent 种子", extensions: ["torrent"] }] });
+  return typeof result === "string" ? result : null;
 }
 
 export async function pickExportPath(defaultPath?: string): Promise<string | null> {

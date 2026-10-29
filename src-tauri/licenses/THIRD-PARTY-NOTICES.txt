@@ -1,0 +1,14 @@
+NDM includes a native C++ ndm-bt-engine helper statically linked with libtorrent 2.1.1.
+Project: https://www.libtorrent.org/ and https://github.com/arvidn/libtorrent
+License: BSD 3-Clause; see libtorrent-LICENSE.
+Boost 1.88.0 headers are covered by the Boost Software License 1.0; see Boost-LICENSE.
+libtorrent's try_signal dependency uses BSD 3-Clause; see try_signal-LICENSE.
+
+Statically linked OpenSSL 3.5.9 is covered by Apache 2.0; see OpenSSL-LICENSE.
+Project: https://www.openssl.org/
+
+The helper uses nlohmann/json 3.12.0, covered by the MIT license; see nlohmann-json-LICENSE.
+Project: https://github.com/nlohmann/json
+
+Native source: native/bt/ in the NDM repository.
+Reproducible source revisions, archive checksums and build options: scripts/build-bt-helper.ps1.

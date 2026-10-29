@@ -367,6 +367,7 @@ fn accept(mgr: &Arc<Manager>, cap: Capture) -> Result<(), String> {
                 start: true,
                 headers,
                 hls: cap.hls,
+                torrent: None,
             },
         )?;
     }

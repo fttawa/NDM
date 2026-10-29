@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "NDM",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "identifier": "com.ndm.app",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "pnpm build:bt-helper && pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm build:bt-helper && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -42,7 +42,9 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../extension/": "extension/"
+      "../extension/": "extension/",
+      "licenses/": "licenses/",
+      "bt-helper/native/": "bt-helper/"
     }
   }
 }

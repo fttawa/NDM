@@ -29,6 +29,9 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Native build tools
+        run: choco install nasm strawberryperl ninja --no-progress -y
+
       - name: Build and publish Tauri release
         uses: tauri-apps/tauri-action@v1
         env:

@@ -4,10 +4,12 @@ mod commands;
 mod diagnostics;
 mod engine;
 mod hls;
+mod libtorrent;
 mod limiter;
 mod manager;
 mod model;
 mod storage;
+mod torrent;
 mod util;
 
 use manager::Manager;
@@ -121,6 +123,7 @@ pub fn run() {
             commands::set_settings,
             commands::add_tasks,
             commands::inspect_hls,
+            commands::add_torrent_file,
             commands::pause_tasks,
             commands::resume_tasks,
             commands::remove_tasks,

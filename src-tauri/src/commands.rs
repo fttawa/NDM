@@ -183,6 +183,45 @@ pub fn add_tasks(m: M, urls: Vec<String>, options: AddArgs) -> Result<Vec<Task>,
             start: options.start.unwrap_or(true),
             headers: options.headers,
             hls: options.hls,
+            torrent: None,
+        },
+    )
+}
+
+#[tauri::command]
+pub async fn add_torrent_file(
+    m: M<'_>,
+    path: String,
+    options: AddArgs,
+) -> Result<Vec<Task>, String> {
+    use tokio::io::AsyncReadExt;
+    if !path.to_ascii_lowercase().ends_with(".torrent") {
+        return Err("请选择 .torrent 种子文件".into());
+    }
+    let file = tokio::fs::File::open(&path)
+        .await
+        .map_err(|e| format!("无法读取种子：{e}"))?;
+    let mut bytes = Vec::new();
+    file.take(crate::torrent::MAX_META as u64 + 1)
+        .read_to_end(&mut bytes)
+        .await
+        .map_err(|e| e.to_string())?;
+    let (source, name, _) = crate::torrent::parse_metainfo(&bytes)?;
+    let url = source.magnet_url();
+    m.add_tasks(
+        vec![url],
+        AddOptions {
+            save_dir: options.save_dir,
+            file_name: options
+                .file_name
+                .filter(|s| !s.trim().is_empty())
+                .or(Some(name)),
+            file_names: None,
+            connections: None,
+            start: options.start.unwrap_or(true),
+            headers: vec![],
+            hls: false,
+            torrent: Some(source),
         },
     )
 }

@@ -211,6 +211,7 @@ impl Storage {
             return Err(format!("备份版本过高：{}", bundle.version).into());
         }
         let mut ids = std::collections::HashSet::new();
+        let mut bt_hashes = std::collections::HashSet::new();
         for task in &bundle.tasks {
             if task.id.is_empty()
                 || !ids.insert(&task.id)
@@ -219,8 +220,13 @@ impl Storage {
                 return Err("备份包含重复任务 ID 或非法文件名".into());
             }
             let url = reqwest::Url::parse(&task.url)?;
-            if !matches!(url.scheme(), "http" | "https") {
-                return Err("备份任务只支持 HTTP/HTTPS".into());
+            if let Some(source) = &task.torrent {
+                crate::torrent::validate_source(source, &task.url)?;
+                if !bt_hashes.insert(&source.info_hash) {
+                    return Err("备份包含重复的 BT 任务".into());
+                }
+            } else if !matches!(url.scheme(), "http" | "https") {
+                return Err("备份任务链接类型无效".into());
             }
             if !valid_segments(task) {
                 return Err("备份包含无效的下载分段进度".into());

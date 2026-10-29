@@ -166,6 +166,7 @@ function TaskCardInner({ task }: { task: Task }) {
           </div>
           <div className="sub">
             {task.hls && <span className="pill">HLS</span>}
+            {task.torrent && <span className="pill">{task.torrent.version === 2 ? "BTv2" : "BT"}</span>}
             {task.status === "completed" ? (
               bytes(task.total)
             ) : (
@@ -188,11 +189,13 @@ function TaskCardInner({ task }: { task: Task }) {
               <AnimatedNumber className="speed" mode="smooth" value={task.speed} format={speed} />
               <span>剩余 {eta(remaining, task.speed)}</span>
               <span>
-                {task.activeConns} 连接{task.boost > 0 && <span className="boost">超频 +{task.boost}</span>}
+                {task.activeConns} {task.torrent ? "Peer" : "连接"}{task.boost > 0 && <span className="boost">超频 +{task.boost}</span>}
               </span>
             </>
           )}
           {task.status === "waiting" && <span>排队等待中…</span>}
+          {task.torrent && task.status === "active" && task.total == null && <span>正在解析磁力元数据…</span>}
+          {task.torrent && task.status === "active" && task.total != null && task.activeConns === 0 && <span>校验文件 / 寻找 Peer…</span>}
           {task.status === "paused" && <span>{task.hls ? "HLS · 继续时从头下载" : task.resumable ? "可断点续传" : "不支持续传，将重新下载"}</span>}
           {task.status === "error" && <span className="err" title={task.error ?? ""}>{task.error}</span>}
           {task.status === "completed" && <span>保存于 {task.saveDir}</span>}

@@ -52,15 +52,15 @@ export function TaskDrawer() {
                   <b>{task.status === "active" && task.total ? eta(task.total - task.downloaded, task.speed) : "--"}</b>
                 </div>
                 <div>
-                  <span className="muted">连接</span>
+                  <span className="muted">{task.torrent ? "Peer" : "连接"}</span>
                   <b>
                     {task.status === "active" ? task.activeConns : 0} / {task.connections}
                     {task.status === "active" && task.boost > 0 && <span className="boost">+{task.boost}</span>}
                   </b>
                 </div>
                 <div>
-                  <span className="muted">分段</span>
-                  <b>{task.segments.length || 1}</b>
+                  <span className="muted">{task.torrent ? "文件" : "分段"}</span>
+                  <b>{task.torrent ? task.torrent.files.length || "解析中" : task.segments.length || 1}</b>
                 </div>
               </div>
             </div>
@@ -83,7 +83,8 @@ export function TaskDrawer() {
               <dt>保存位置</dt>
               <dd className="mono">{task.saveDir}</dd>
               <dt>断点续传</dt>
-              <dd>{task.hls ? "HLS · 暂停后从头下载" : task.total == null ? "未知" : task.resumable ? "支持" : "不支持"}</dd>
+              <dd>{task.torrent ? "支持 · 继续时校验已有分片" : task.hls ? "HLS · 暂停后从头下载" : task.total == null ? "未知" : task.resumable ? "支持" : "不支持"}</dd>
+              {task.torrent && <><dt>BT 内核</dt><dd>libtorrent · {task.torrent.version === 2 ? "BTv2" : "BTv1 / 混合"} · 完成后停止做种</dd><dt>Info Hash</dt><dd className="mono">{task.torrent.infoHash}</dd></>}
               {task.status === "active" && task.latencyMs > 0 && (
                 <>
                   <dt>请求延迟</dt>
@@ -105,6 +106,7 @@ export function TaskDrawer() {
                 </>
               )}
             </dl>
+            {task.torrent && task.torrent.files.length > 0 && <details className="field"><summary>种子文件（{task.torrent.files.length}）</summary><ul className="small">{task.torrent.files.map(file => <li key={file} style={{ overflowWrap: "anywhere" }}>{file}</li>)}</ul></details>}
 
             <div className="drawer-actions">
               {(task.status === "active" || task.status === "waiting") && (
@@ -119,7 +121,7 @@ export function TaskDrawer() {
               )}
               {task.status === "completed" && (
                 <button className="btn primary" onClick={() => api.openFile(task.id)}>
-                  <ExternalLink size={15} /> 打开文件
+                  <ExternalLink size={15} /> {task.torrent ? "打开内容文件夹" : "打开文件"}
                 </button>
               )}
               <button className="btn glass" onClick={() => api.reveal(task.id)}>

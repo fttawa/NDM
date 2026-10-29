@@ -1,11 +1,12 @@
 {
   "name": "ndm",
   "private": true,
-  "version": "0.2.5",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:bt-helper": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-bt-helper.ps1",
     "preview": "vite preview",
     "tauri": "tauri"
   },

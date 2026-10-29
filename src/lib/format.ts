@@ -47,6 +47,6 @@ export function dateTime(ms: number | null): string {
 }
 
 export function extractUrls(text: string): string[] {
-  const re = /https?:\/\/[^\s"'<>]+/gi;
+  const re = /(?:https?:\/\/|magnet:\?)[^\s"'<>]+/gi;
   return Array.from(new Set(text.match(re) ?? []));
 }

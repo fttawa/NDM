@@ -26,6 +26,7 @@ pub struct Manager {
     pub limiter: Limiter,
     storage: Storage,
     pending_import: Mutex<Option<(String, ExportBundle)>>,
+    pub torrent_engine: crate::torrent::Engine,
 }
 
 pub struct AddOptions {
@@ -37,6 +38,7 @@ pub struct AddOptions {
     pub start: bool,
     pub headers: Vec<(String, String)>,
     pub hls: bool,
+    pub torrent: Option<crate::torrent::Source>,
 }
 
 /// 按设置构建 HTTP 客户端；自定义代理地址无效时返回错误
@@ -150,6 +152,7 @@ impl Manager {
             app,
             storage,
             pending_import: Mutex::new(None),
+            torrent_engine: Default::default(),
         }))
     }
 
@@ -208,7 +211,11 @@ impl Manager {
             task.speed = 0;
             task.active_conns = 0;
             task.boost = 0;
-            task.connections = task.connections.clamp(1, 32);
+            task.connections = if task.torrent.is_some() {
+                80
+            } else {
+                task.connections.clamp(1, 32)
+            };
             if matches!(task.status, Status::Active | Status::Waiting) {
                 task.status = Status::Paused;
             }
@@ -242,7 +249,13 @@ impl Manager {
     }
 
     pub fn snapshot(&self) -> Vec<Task> {
-        self.tasks.lock().clone()
+        let mut tasks = self.tasks.lock().clone();
+        for task in &mut tasks {
+            if let Some(source) = &mut task.torrent {
+                source.metainfo.clear();
+            }
+        }
+        tasks
     }
 
     pub fn task(&self, id: &str) -> Option<Task> {
@@ -325,14 +338,37 @@ impl Manager {
         if let Some(client) = client {
             *self.client.write() = client;
         }
-        self.limiter.set_rate(s.speed_limit.saturating_mul(1024));
         *self.settings.write() = s.clone();
+        self.sync_limits();
         drop(guard);
         self.schedule();
         Ok(s)
     }
 
     /// 按并发上限启动等待中的任务
+    pub fn sync_limits(&self) {
+        let rate = self.settings.read().speed_limit.saturating_mul(1024);
+        let tasks = self.tasks.lock();
+        let bt = tasks
+            .iter()
+            .filter(|t| t.status == Status::Active && t.torrent.is_some())
+            .count() as u64;
+        let http = tasks
+            .iter()
+            .filter(|t| t.status == Status::Active && t.torrent.is_none())
+            .count() as u64;
+        let per_task = if rate == 0 {
+            0
+        } else {
+            (rate / (bt + http).max(1)).max(1)
+        };
+        self.limiter.set_rate(if http > 0 {
+            per_task.saturating_mul(http)
+        } else {
+            rate
+        });
+        self.torrent_engine.set_limit(per_task);
+    }
     pub fn schedule(self: &Arc<Self>) {
         let max = self.settings.read().max_concurrent as usize;
         let mut started = Vec::new();
@@ -352,6 +388,7 @@ impl Manager {
                 }
             }
         }
+        self.sync_limits();
         for (id, rt) in started {
             let me = self.clone();
             tauri::async_runtime::spawn(async move { me.run_task(id, rt).await });
@@ -458,7 +495,12 @@ impl Manager {
                     let latency_ms = rt.latency_ms.load(std::sync::atomic::Ordering::Acquire);
                     if let Some(t) = tasks.iter_mut().find(|t| &t.id == id) {
                         t.downloaded = downloaded;
-                        t.speed = speed as u64;
+                        let speed = if t.torrent.is_some() {
+                            rt.torrent_speed.load(std::sync::atomic::Ordering::Acquire)
+                        } else {
+                            speed as u64
+                        };
+                        t.speed = speed;
                         t.active_conns = conns;
                         t.boost = boost;
                         t.latency_ms = latency_ms;
@@ -466,7 +508,7 @@ impl Manager {
                             id: id.clone(),
                             downloaded,
                             total: t.total,
-                            speed: speed as u64,
+                            speed,
                             active_conns: conns,
                             boost,
                             latency_ms,
@@ -511,13 +553,27 @@ impl Manager {
             })
             .filter(|(u, _)| {
                 reqwest::Url::parse(u)
-                    .map(|p| matches!(p.scheme(), "http" | "https"))
+                    .map(|p| matches!(p.scheme(), "http" | "https" | "magnet"))
                     .unwrap_or(false)
             })
             .collect();
         if pairs.is_empty() {
-            return Err("没有有效的 HTTP/HTTPS 链接".into());
+            return Err("没有有效的 HTTP/HTTPS 或磁力链接".into());
         }
+        // Validate the whole batch before mutating the queue.
+        let sources: Vec<_> = pairs
+            .iter()
+            .map(|(url, _)| {
+                if url
+                    .get(..7)
+                    .is_some_and(|s| s.eq_ignore_ascii_case("magnet:"))
+                {
+                    crate::torrent::magnet_source(url).map(Some)
+                } else {
+                    Ok(None)
+                }
+            })
+            .collect::<Result<_, String>>()?;
         let save_dir = opts
             .save_dir
             .filter(|d| !d.trim().is_empty())
@@ -530,8 +586,43 @@ impl Manager {
         // 本批次已占用的文件名（同批同名文件也要去重）
         let mut batch_names = std::collections::HashSet::new();
         let mut tasks = self.tasks.lock();
-        for (url, custom) in pairs {
-            let hls = opts.hls || crate::hls::is_hls_url(&url);
+        let mut hashes = std::collections::HashSet::new();
+        for (source, _) in sources.iter().flatten() {
+            if !hashes.insert(&source.info_hash)
+                || tasks.iter().any(|t| {
+                    t.torrent
+                        .as_ref()
+                        .is_some_and(|s| s.info_hash == source.info_hash)
+                })
+            {
+                return Err("该种子已在任务列表中，请继续或重新下载已有任务".into());
+            }
+        }
+        for ((url, custom), magnet) in pairs.into_iter().zip(sources) {
+            let url = if magnet.is_some() {
+                reqwest::Url::parse(&url).unwrap().to_string()
+            } else {
+                url
+            };
+            let torrent = magnet
+                .as_ref()
+                .map(|(source, _)| opts.torrent.clone().unwrap_or_else(|| source.clone()));
+            if let Some(source) = torrent.as_ref() {
+                crate::torrent::validate_source(source, &url)?;
+            }
+            let hls = torrent.is_none() && (opts.hls || crate::hls::is_hls_url(&url));
+            let total = torrent
+                .as_ref()
+                .filter(|source| !source.metainfo.is_empty())
+                .map(|source| {
+                    crate::torrent::parse_metainfo(&source.metainfo).map(|(_, _, total)| total)
+                })
+                .transpose()?;
+            let custom = if torrent.is_some() {
+                Some(custom.unwrap_or_else(|| magnet.as_ref().unwrap().1.clone()))
+            } else {
+                custom
+            };
             let (file_name, locked) = match custom {
                 Some(n) => (n, true),
                 None => (
@@ -556,26 +647,37 @@ impl Manager {
             created.push(Task {
                 id: uuid::Uuid::new_v4().to_string(),
                 hls,
+                torrent,
                 url,
                 file_name,
                 name_locked: locked,
                 save_dir: save_dir.clone(),
-                total: None,
+                total,
                 downloaded: 0,
                 status: if opts.start {
                     Status::Waiting
                 } else {
                     Status::Paused
                 },
-                resumable: false,
+                resumable: magnet.is_some(),
                 force_single: false,
                 segments: Vec::new(),
-                connections: if hls { 1 } else { conns },
+                connections: if magnet.is_some() {
+                    80
+                } else if hls {
+                    1
+                } else {
+                    conns
+                },
                 created_at: now_ms(),
                 finished_at: None,
                 error: None,
                 mime: None,
-                headers: opts.headers.clone(),
+                headers: if magnet.is_some() {
+                    vec![]
+                } else {
+                    opts.headers.clone()
+                },
                 speed: 0,
                 active_conns: 0,
                 boost: 0,
@@ -589,6 +691,11 @@ impl Manager {
         drop(tasks);
         self.persist();
         self.schedule();
+        for task in &mut created {
+            if let Some(source) = &mut task.torrent {
+                source.metainfo.clear();
+            }
+        }
         Ok(created)
     }
 
@@ -662,6 +769,17 @@ impl Manager {
                         }
                         tokio::time::sleep(Duration::from_millis(50)).await;
                     }
+                    if me.active.lock().contains_key(&t.id) {
+                        continue;
+                    }
+                    if let Some(source) = &t.torrent {
+                        if let Err(e) =
+                            crate::torrent::delete_files(&t.save_dir, &t.file_name, source)
+                        {
+                            eprintln!("删除 BT 文件失败：{e}");
+                        }
+                        continue;
+                    }
                     let dir = Path::new(&t.save_dir);
                     let _ = std::fs::remove_file(dir.join(format!("{}.part", t.file_name)));
                     if t.status == Status::Completed {
@@ -689,8 +807,15 @@ impl Manager {
             let mut tasks = self.tasks.lock();
             if let Some(t) = tasks.iter_mut().find(|t| t.id == id) {
                 let dir = Path::new(&t.save_dir);
+                if t.torrent.is_some() {
+                    // Keep previous content and use a fresh folder for an explicit restart.
+                    t.file_name = util::unique_name(dir, &t.file_name, |_| false);
+                    t.name_locked = true;
+                }
                 let _ = std::fs::remove_file(dir.join(format!("{}.part", t.file_name)));
-                if t.status == Status::Completed || dir.join(&t.file_name).exists() {
+                if t.torrent.is_none()
+                    && (t.status == Status::Completed || dir.join(&t.file_name).exists())
+                {
                     // 已存在同名文件时重新探测命名，避免覆盖
                     t.name_locked = false;
                 }

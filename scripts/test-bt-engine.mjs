@@ -1,0 +1,192 @@
+import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, openSync, writeSync, closeSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createInterface } from 'node:readline';
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const helperArg = process.argv.indexOf('--helper');
+const engine = helperArg < 0 ? path.join(root, 'src-tauri/bt-helper/native/ndm-bt-engine.exe') : path.resolve(process.argv[helperArg + 1]);
+const seeder = path.join(root, '.native-build/build/bin/ndm-bt-fixture.exe');
+
+class Process {
+  constructor(exe, args = []) {
+    this.child = spawn(exe, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    this.pending = []; this.events = []; this.stderr = ''; this.exited = false;
+    this.child.stderr.on('data', b => { this.stderr += b; });
+    this.child.stdin.on('error', () => {});
+    createInterface({ input: this.child.stdout }).on('line', line => {
+      const event = JSON.parse(line);
+      if (process.env.NDM_BT_TEST_TRACE) console.log({ ...event, metainfo: event.metainfo ? '(cached)' : undefined });
+      if (this.pending.length) this.pending.shift()(event); else this.events.push(event);
+    });
+    this.done = new Promise(resolve => this.child.on('close', code => { this.exited = true; this.code = code; resolve(code); }));
+  }
+  send(event) { this.child.stdin.write(JSON.stringify(event) + '\n'); }
+  async next(timeout = 15000) {
+    if (this.events.length) return this.events.shift();
+    if (this.exited) throw Error(`Engine exited ${this.code}: ${this.stderr}`);
+    let timer, resolve;
+    const event = await Promise.race([
+      new Promise(r => { resolve = r; this.pending.push(r); }),
+      this.done.then(code => { throw Error(`Engine exited ${code}: ${this.stderr}`); }),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(Error('Engine event timed out')), timeout); }),
+    ]).finally(() => { clearTimeout(timer); this.pending = this.pending.filter(r => r !== resolve); });
+    return event;
+  }
+  async close() {
+    if (!this.exited) this.child.stdin.end();
+    let timer;
+    await Promise.race([this.done, new Promise(resolve => { timer = setTimeout(() => { this.child.kill(); resolve(); }, 5000); })]);
+    clearTimeout(timer);
+    if (!this.exited) await this.done;
+  }
+}
+
+async function fixture(mode, action) {
+  const temp = mkdtempSync(path.join(tmpdir(), 'ndm-native-bt-'));
+  const processes = [];
+  try {
+    const seed = new Process(seeder, [temp, mode]); processes.push(seed);
+    const info = await seed.next(); assert.equal(info.type, 'fixture');
+    assert.equal(info.version, mode === 'v2' ? 2 : 1);
+    assert.equal(info.total, 1572924);
+    const start = (metainfo = '', limit = 0, directory = path.join(temp, 'download'), changes = {}) => {
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(path.join(directory, '.ndm-torrent'), info.infoHash);
+      const p = new Process(engine); processes.push(p);
+      p.send({ type: 'run', url: info.url, hash: info.infoHash, version: info.version,
+        directory, metainfo, limit, localTest: true, ...changes });
+      return p;
+    };
+    await action({ temp, info, start });
+  } finally {
+    await Promise.all(processes.map(p => p.close()));
+    rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+async function until(p, predicate, authorize = true) {
+  const deadline = Date.now() + 45000;
+  while (Date.now() < deadline) {
+    const e = await p.next();
+    assert.notEqual(e.type, 'error', e.message);
+    if (e.type === 'metadata' && authorize) p.send({ type: 'start' });
+    if (predicate(e)) return e;
+  }
+  throw Error('Transfer deadline exceeded');
+}
+
+for (const mode of ['v1', 'v2', 'hybrid']) {
+  test(`${mode}: real magnet metadata, rate limit, pause, fresh process resume and corrupt piece repair`, { timeout: 60000 }, async () => {
+    await fixture(mode, async ({ temp, info, start }) => {
+      const first = start('', 128 * 1024); let cached, paused = false;
+      await until(first, e => {
+        if (e.type === 'metadata') cached = e.metainfo;
+        if (e.type === 'progress' && e.downloaded >= 65536 && !paused) { first.send({ type: 'stop' }); paused = true; }
+        assert.notEqual(e.type, 'complete', 'rate limited task must pause before completion');
+        return e.type === 'stopped';
+      });
+      assert.ok(paused && cached); assert.equal(await first.done, 0);
+      const directory = path.join(temp, 'download');
+      const fd = openSync(path.join(directory, 'pack/a.bin'), 'r+');
+      writeSync(fd, Buffer.alloc(32768, 255), 0, 32768, 0); closeSync(fd);
+      const resumed = start(cached, 128 * 1024);
+      resumed.send({ type: 'limit', bps: 0 });
+      await until(resumed, e => e.type === 'complete'); assert.equal(await resumed.done, 0);
+      for (const file of info.files) assert.deepEqual(readFileSync(path.join(directory, file)), readFileSync(path.join(temp, 'seed', file)));
+      assert.ok(cached.length > 100);
+    });
+  });
+
+  test(`${mode}: torrent import, content authorization, file transfer and parent EOF`, { timeout: 60000 }, async () => {
+    await fixture(mode, async ({ temp, info, start }) => {
+      const inspection = spawnSync(engine, { input: JSON.stringify({ type: 'inspect', metainfo: info.metainfo }) + '\n', encoding: 'utf8', windowsHide: true, timeout: 15000 });
+      assert.equal(inspection.status, 0, inspection.stdout + inspection.stderr);
+      const parsed = JSON.parse(inspection.stdout);
+      assert.equal(parsed.infoHash, info.infoHash); assert.equal(parsed.total, info.total);
+      assert.deepEqual(parsed.files, info.files);
+      const p = start(info.metainfo);
+      await until(p, e => e.type === 'metadata', false);
+      await new Promise(resolve => setTimeout(resolve, 400));
+      // No content may transfer while the parent is still checking paths.
+      let event;
+      do { event = await p.next(); assert.notEqual(event.type, 'error', event.message); } while (event.type !== 'progress');
+      assert.equal(event.downloaded, 0);
+      p.send({ type: 'start' }); await until(p, e => e.type === 'complete'); assert.equal(await p.done, 0);
+      for (const file of info.files) assert.deepEqual(readFileSync(path.join(temp, 'download', file)), readFileSync(path.join(temp, 'seed', file)));
+      const pending = start('', 0, path.join(temp, 'cancel'), { url: `magnet:?xt=urn:${info.version === 2 ? 'btmh:1220' : 'btih:'}${'1'.repeat(info.version === 2 ? 64 : 40)}`, hash: '1'.repeat(info.version === 2 ? 64 : 40) });
+      pending.child.stdin.end(); await until(pending, e => e.type === 'stopped', false); assert.equal(await pending.done, 0);
+    });
+  });
+}
+
+test('rejects malformed metainfo and mismatched cached hashes', { timeout: 20000 }, async () => {
+  const result = spawnSync(engine, { input: JSON.stringify({ type: 'inspect', metainfo: Buffer.from('not a torrent').toString('base64') }) + '\n', encoding: 'utf8', timeout: 15000, windowsHide: true });
+  assert.equal(result.status, 1); assert.equal(JSON.parse(result.stdout).type, 'error');
+  await fixture('v2', async ({ info, start }) => {
+    const p = start(info.metainfo, 0, undefined, { hash: '0'.repeat(64) });
+    const event = await p.next(); assert.equal(event.type, 'error'); assert.match(event.message, /hash mismatch/);
+    assert.equal(await p.done, 1);
+  });
+});
+
+test('rejects output directory junctions before opening torrent content', { timeout: 20000 }, async () => {
+  await fixture('v2', async ({ temp, info, start }) => {
+    const target = path.join(temp, 'unrelated'); mkdirSync(target);
+    const link = path.join(temp, 'linked'); symlinkSync(target, link, 'junction');
+    const p = start(info.metainfo, 0, link);
+    const event = await p.next(); assert.equal(event.type, 'error'); assert.match(event.message, /link|junction/);
+    assert.equal(await p.done, 1);
+  });
+});
+
+// Retain binary dictionary keys so hashing/re-encoding v2 Merkle layers is exact.
+function bdecode(buffer) {
+  let pos = 0;
+  function read() {
+    const token = buffer[pos];
+    if (token === 105) { const end = buffer.indexOf(101, ++pos); const n = Number(buffer.subarray(pos, end)); pos = end + 1; return n; }
+    if (token === 100 || token === 108) {
+      ++pos; const value = token === 100 ? new Map() : [];
+      while (buffer[pos] !== 101) { if (value instanceof Map) { const key = read(); value.set(key, read()); } else value.push(read()); }
+      ++pos; return value;
+    }
+    const colon = buffer.indexOf(58, pos); const size = Number(buffer.subarray(pos, colon));
+    pos = colon + 1; const bytes = buffer.subarray(pos, pos + size); pos += size; return bytes;
+  }
+  return read();
+}
+function bencode(value) {
+  if (Buffer.isBuffer(value)) return Buffer.concat([Buffer.from(`${value.length}:`), value]);
+  if (typeof value === 'number') return Buffer.from(`i${value}e`);
+  if (Array.isArray(value)) return Buffer.concat([Buffer.from('l'), ...value.map(bencode), Buffer.from('e')]);
+  return Buffer.concat([Buffer.from('d'), ...[...value.entries()].sort(([a], [b]) => Buffer.compare(a, b)).flatMap(([k, v]) => [bencode(k), bencode(v)]), Buffer.from('e')]);
+}
+function field(dict, name) { return [...dict.entries()].find(([k]) => k.toString() === name)?.[1]; }
+
+test('rejects invalid BTv2 Merkle piece layers', { timeout: 20000 }, async () => {
+  const value = bdecode(readFileSync(path.join(root, 'src-tauri/tests/fixtures/bt/v2.torrent')));
+  const layers = field(value, 'piece layers'); assert.ok(layers.size);
+  for (const [key, hashes] of layers) layers.set(key, Buffer.alloc(hashes.length));
+  const result = spawnSync(engine, { input: JSON.stringify({ type: 'inspect', metainfo: bencode(value).toString('base64') }) + '\n', encoding: 'utf8', timeout: 15000, windowsHide: true });
+  assert.equal(result.status, 1); assert.match(JSON.parse(result.stdout).message, /piece layer/);
+});
+
+test('hybrid metadata obtained through a v2-only magnet retains the requested v2 identity', { timeout: 30000 }, async () => {
+  await fixture('hybrid', async ({ temp, info, start }) => {
+    const metadata = bdecode(Buffer.from(info.metainfo, 'base64'));
+    const hash = createHash('sha256').update(bencode(field(metadata, 'info'))).digest('hex');
+    const url = info.url.replace(/xt=urn:btih:[^&]*&?/, '');
+    assert.ok(url.includes(`urn:btmh:1220${hash}`));
+    const directory = path.join(temp, 'v2-hybrid');
+    const p = start('', 0, directory, { hash, version: 2, url });
+    writeFileSync(path.join(directory, '.ndm-torrent'), hash);
+    await until(p, e => e.type === 'complete'); assert.equal(await p.done, 0);
+    for (const file of info.files) assert.deepEqual(readFileSync(path.join(directory, file)), readFileSync(path.join(temp, 'seed', file)));
+  });
+});

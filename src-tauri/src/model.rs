@@ -40,6 +40,8 @@ pub struct Task {
     #[serde(default)]
     pub hls: bool,
     #[serde(default)]
+    pub torrent: Option<crate::torrent::Source>,
+    #[serde(default)]
     pub segments: Vec<Segment>,
     pub connections: u32,
     pub created_at: u64,

@@ -150,7 +150,7 @@ export function SettingsView() {
           </label>
         </Tile>
 
-        <Tile icon={<Gauge size={18} />} title="全局限速" desc="0 表示不限速" className="span-2">
+        <Tile icon={<Gauge size={18} />} title="全局限速" desc="0 表示不限速；HTTP 与 BT 按活跃任务数分配带宽，BT 最低 16 KB/s" className="span-2">
           <div className="input-group">
             <input
               className="input"
@@ -171,7 +171,7 @@ export function SettingsView() {
           </div>
         </Tile>
 
-        <Tile icon={<Network size={18} />} title="代理" desc="下载时使用的网络代理" className="span-2">
+        <Tile icon={<Network size={18} />} title="代理" desc="HTTP / HLS 下载代理，BT Peer 连接使用直连" className="span-2">
           <div className="set-row">
             <span>模式</span>
             <Segmented
