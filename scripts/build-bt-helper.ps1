@@ -3,13 +3,24 @@ $taskRoot = Split-Path -Parent $PSScriptRoot
 $taskCache = Join-Path $taskRoot '.native-build'
 New-Item -ItemType Directory -Path $taskCache -Force | Out-Null
 
+function Get-SourceHash($Path) {
+    $stream = [System.IO.File]::OpenRead($Path)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return [System.BitConverter]::ToString($sha256.ComputeHash($stream)).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+        $stream.Dispose()
+    }
+}
+
 function Get-SourceArchive($Name, $Url, $Sha256) {
     $archive = Join-Path $taskCache $Name
     if (-not (Test-Path -LiteralPath $archive)) {
         Write-Host "Downloading $Name"
         Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $archive
     }
-    if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $Sha256) {
+    if ((Get-SourceHash $archive) -ne $Sha256) {
         throw "Checksum mismatch: $Name. Remove the incomplete archive and retry."
     }
     return $archive
@@ -67,7 +78,7 @@ New-Item -ItemType Directory -Path (Split-Path $taskJSON) -Force | Out-Null
 if (-not (Test-Path -LiteralPath $taskJSON)) {
     Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/nlohmann/json/v3.12.0/single_include/nlohmann/json.hpp' -OutFile $taskJSON
 }
-if ((Get-FileHash -LiteralPath $taskJSON -Algorithm SHA256).Hash -ne 'aaf127c04cb31c406e5b04a63f1ae89369fccde6d8fa7cdda1ed4f32dfc5de63') { throw 'JSON header checksum mismatch' }
+if ((Get-SourceHash $taskJSON) -ne 'aaf127c04cb31c406e5b04a63f1ae89369fccde6d8fa7cdda1ed4f32dfc5de63') { throw 'JSON header checksum mismatch' }
 
 $taskBuild = Join-Path $taskCache 'build'
 & cmake -S (Join-Path $taskRoot 'native/bt') -B $taskBuild -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_POLICY_DEFAULT_CMP0144=NEW "-DNDM_LIBTORRENT_SOURCE=$taskLT" "-DBOOST_ROOT=$(Join-Path $taskCache 'boost_1_88_0')" "-DOPENSSL_ROOT_DIR=$taskSSLInstall" "-DNDM_JSON_INCLUDE=$(Join-Path $taskCache 'json')"
@@ -79,7 +90,7 @@ $taskOut = Join-Path $taskRoot 'src-tauri/bt-helper/native'
 New-Item -ItemType Directory -Path $taskOut -Force | Out-Null
 $taskBuiltEngine = Join-Path $taskBuild 'bin/ndm-bt-engine.exe'
 $taskEngine = Join-Path $taskOut 'ndm-bt-engine.exe'
-if (-not (Test-Path -LiteralPath $taskEngine) -or (Get-FileHash -LiteralPath $taskEngine).Hash -ne (Get-FileHash -LiteralPath $taskBuiltEngine).Hash) {
+if (-not (Test-Path -LiteralPath $taskEngine) -or (Get-SourceHash $taskEngine) -ne (Get-SourceHash $taskBuiltEngine)) {
     Copy-Item -LiteralPath $taskBuiltEngine -Destination $taskEngine -Force
 }
 Write-Output "Native BT engine ready: $taskOut/ndm-bt-engine.exe"
