@@ -120,3 +120,108 @@ export function useFlip(deps: unknown) {
     else nodes.current.delete(id);
   };
 }
+
+const reducedMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/**
+ * 进出场：关闭后保留挂载 ms 毫秒，期间 closing 为 true，用于播放退场动画。
+ */
+export function usePresence(open: boolean, ms = 200) {
+  const [mounted, setMounted] = useState(open);
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      return;
+    }
+    const t = window.setTimeout(() => setMounted(false), reducedMotion() ? 0 : ms);
+    return () => window.clearTimeout(t);
+  }, [open, ms]);
+  return { mounted: open || mounted, closing: !open && mounted };
+}
+
+/** 退场期间沿用最后一次有效的值（数据已清空时内容不至于先消失） */
+export function useLatest<T>(value: T, keep: boolean): T {
+  const ref = useRef(value);
+  if (keep) ref.current = value;
+  return keep ? value : ref.current;
+}
+
+/**
+ * 滑动选中指示条：在容器上写入 --ind-x / --ind-w，由 CSS 的 ::after 跟随过渡。
+ * 首次定位不播放过渡，避免从左侧滑入。
+ */
+export function useSlidingIndicator<T extends HTMLElement>(selector: string, deps: unknown) {
+  const ref = useRef<T>(null);
+  useLayoutEffect(() => {
+    const box = ref.current;
+    if (!box) return;
+    const place = () => {
+      const el = box.querySelector<HTMLElement>(selector);
+      box.classList.toggle("has-ind", !!el);
+      if (!el) return;
+      box.style.setProperty("--ind-x", `${el.offsetLeft}px`);
+      box.style.setProperty("--ind-y", `${el.offsetTop}px`);
+      box.style.setProperty("--ind-w", `${el.offsetWidth}px`);
+      box.style.setProperty("--ind-h", `${el.offsetHeight}px`);
+    };
+    place();
+    // 下一帧再开启过渡，首次渲染直接到位
+    const raf = requestAnimationFrame(() => box.classList.add("ind-ready"));
+    const ro = new ResizeObserver(place);
+    ro.observe(box);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
+  }, [deps, selector]);
+  return ref;
+}
+
+/**
+ * 列表退场：被移除的项在原位置保留 ms 毫秒并标记 leaving，之后真正移除（其余项再由 FLIP 补位）。
+ * resetKey 变化（如切换筛选）时直接替换，不播放退场。
+ */
+export function useLeaving<T extends { id: string }>(items: T[], resetKey: unknown, ms = 220) {
+  const shown = useRef<{ item: T; leaving: boolean }[]>([]);
+  const lastKey = useRef(resetKey);
+  const [, force] = useState(0);
+  const timers = useRef(new Map<string, number>());
+
+  useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
+
+  const ids = new Set(items.map((t) => t.id));
+  let next: { item: T; leaving: boolean }[];
+  if (lastKey.current !== resetKey || reducedMotion()) {
+    lastKey.current = resetKey;
+    next = items.map((item) => ({ item, leaving: false }));
+  } else {
+    next = items.map((item) => ({ item, leaving: false }));
+    // 已消失的项插回原来的位置
+    shown.current.forEach((entry, index) => {
+      if (ids.has(entry.item.id)) return;
+      next.splice(Math.min(index, next.length), 0, { item: entry.item, leaving: true });
+    });
+  }
+  shown.current = next;
+
+  useEffect(() => {
+    next.forEach(({ item, leaving }) => {
+      if (!leaving) {
+        const t = timers.current.get(item.id);
+        if (t) window.clearTimeout(t), timers.current.delete(item.id);
+        return;
+      }
+      if (timers.current.has(item.id)) return;
+      timers.current.set(
+        item.id,
+        window.setTimeout(() => {
+          timers.current.delete(item.id);
+          shown.current = shown.current.filter((e) => e.item.id !== item.id || !e.leaving);
+          force((n) => n + 1);
+        }, ms),
+      );
+    });
+  });
+
+  return next;
+}

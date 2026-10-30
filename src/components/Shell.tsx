@@ -2,7 +2,7 @@ import { ArrowDownToLine, House, Minus, Settings2, Square, X } from "lucide-reac
 import { windowAction } from "../lib/api";
 import { speed } from "../lib/format";
 import { useStore } from "../store";
-import { AnimatedNumber } from "./Animated";
+import { AnimatedNumber, useLatest } from "./Animated";
 
 export function TitleBar() {
   const total = useStore((s) => s.tasks.reduce((a, t) => a + (t.status === "active" ? t.speed : 0), 0));
@@ -10,9 +10,9 @@ export function TitleBar() {
     <div className="titlebar" data-tauri-drag-region>
       <div className="tb-speed" data-tauri-drag-region>
         {total > 0 && (
-          <>
+          <span className="tb-speed-val">
             <ArrowDownToLine size={13} /> <AnimatedNumber mode="smooth" value={total} format={speed} />
-          </>
+          </span>
         )}
       </div>
       <div className="win-ctrls">
@@ -58,5 +58,7 @@ export function Sidebar() {
 
 export function Toast() {
   const toast = useStore((s) => s.toast);
-  return <div className={`toast glass-strong ${toast ? "show" : ""}`}>{toast}</div>;
+  // 淡出过程中保留文字
+  const text = useLatest(toast, !!toast);
+  return <div className={`toast glass-strong ${toast ? "show" : ""}`} role="status">{text}</div>;
 }

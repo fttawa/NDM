@@ -19,7 +19,6 @@ const isEditable = (el: EventTarget | null) =>
 export default function App() {
   const init = useStore((s) => s.init);
   const view = useStore((s) => s.view);
-  const filter = useStore((s) => s.filter);
   const settings = useStore((s) => s.settings);
   const openAdd = useStore((s) => s.openAdd);
   const lastClip = useRef<string | null>(null);
@@ -104,7 +103,7 @@ export default function App() {
       <Sidebar />
       <main className="main">
         <TitleBar />
-        <div className="content" key={`${view}-${filter}`}>{view === "home" ? <HomeView /> : view === "tasks" ? <TasksView /> : view === "bt-detail" ? <BtDetailView /> : view === "bt-settings" ? <BtSettingsView /> : view === "schedule" ? <ScheduleView /> : <SettingsView />}</div>
+        <div className="content" key={view}>{view === "home" ? <HomeView /> : view === "tasks" ? <TasksView /> : view === "bt-detail" ? <BtDetailView /> : view === "bt-settings" ? <BtSettingsView /> : view === "schedule" ? <ScheduleView /> : <SettingsView />}</div>
       </main>
       <TaskDrawer />
       <UpdateNotice />

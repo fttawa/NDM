@@ -1760,3 +1760,240 @@ button {
   .compact .task-foot { grid-row: 1; grid-column: 2; }
   .schedule-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ============ 动画补全 ============ */
+:root {
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.3, 1.3, 0.5, 1);
+  /* 允许 height: auto 参与过渡（用于 details 展开） */
+  interpolate-size: allow-keywords;
+}
+
+/* 滑动选中指示条（useSlidingIndicator 写入位置） */
+.download-filters,
+.segmented {
+  position: relative;
+  isolation: isolate;
+}
+.has-ind::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: -1;
+  width: var(--ind-w);
+  height: var(--ind-h);
+  transform: translate(var(--ind-x), var(--ind-y));
+  border-radius: 8px;
+  background: var(--accent-soft);
+  pointer-events: none;
+}
+.segmented.has-ind::after {
+  border-radius: 10px;
+  background: var(--glass-strong);
+}
+.ind-ready::after {
+  transition: transform 0.32s var(--ease-out), width 0.32s var(--ease-out), height 0.32s var(--ease-out);
+}
+.has-ind > button.active {
+  background: transparent;
+}
+.download-filters button,
+.chip-btn {
+  transition: background 0.18s, color 0.18s, border-color 0.18s;
+}
+
+/* 侧栏选中竖条：切换时从中间伸出 */
+.nav-btn.active::before {
+  animation: nav-bar-in 0.32s var(--ease-spring);
+}
+@keyframes nav-bar-in {
+  from {
+    transform: scaleY(0);
+  }
+}
+.nav-btn svg {
+  transition: transform 0.2s var(--ease-out);
+}
+.nav-btn:active svg {
+  transform: scale(0.88);
+}
+
+/* 标题栏总速度：出现时淡入 */
+.tb-speed-val {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  animation: fade 0.3s ease;
+}
+
+/* 任务卡片：依次进场；被移除时原位淡出缩小，其余卡片再补位 */
+.task-card {
+  animation-duration: 0.35s;
+  animation-timing-function: var(--ease-out);
+  animation-delay: var(--stagger, 0s);
+}
+.flip-item.leaving {
+  pointer-events: none;
+  animation: card-out 0.22s ease forwards;
+}
+@keyframes card-out {
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+.task-check svg {
+  transform: scale(0.4);
+  transition: transform 0.22s var(--ease-spring);
+}
+.task-card.checked .task-check svg {
+  transform: none;
+}
+.empty {
+  animation: fade-up 0.35s var(--ease-out);
+}
+
+/* 首页、设置等磁贴：进入页面时依次浮现 */
+.bento > *,
+.schedule-grid > *,
+.bt-settings-grid > *,
+.bt-metrics > * {
+  animation: fade-up 0.4s var(--ease-out) both;
+}
+.bento > :nth-child(2), .schedule-grid > :nth-child(2), .bt-settings-grid > :nth-child(2), .bt-metrics > :nth-child(2) { animation-delay: 40ms; }
+.bento > :nth-child(3), .bt-settings-grid > :nth-child(3), .bt-metrics > :nth-child(3) { animation-delay: 80ms; }
+.bento > :nth-child(4), .bt-settings-grid > :nth-child(4), .bt-metrics > :nth-child(4) { animation-delay: 120ms; }
+.bento > :nth-child(5), .bt-settings-grid > :nth-child(5) { animation-delay: 160ms; }
+.bento > :nth-child(6), .bt-settings-grid > :nth-child(6) { animation-delay: 200ms; }
+.bento > :nth-child(n + 7) { animation-delay: 240ms; }
+.tile-stat-link:active,
+.tile-paste:active {
+  transform: scale(0.985);
+}
+
+/* 弹窗退场 */
+.modal-mask.closing {
+  pointer-events: none;
+  animation: fade-out 0.18s ease forwards;
+}
+.modal-mask.closing .modal {
+  animation: pop-out 0.18s ease forwards;
+}
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes pop-out {
+  to {
+    opacity: 0;
+    transform: scale(0.97) translateY(4px);
+  }
+}
+
+/* 详情抽屉：内容随抽屉一起淡入，关闭时保持到滑出 */
+.drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1 0 auto;
+  animation: fade-up 0.35s var(--ease-out) 0.05s both;
+}
+.drawer-body > * {
+  flex-shrink: 0;
+}
+
+/* Toast 与右下角 / 底部通知 */
+.toast {
+  transition: transform 0.3s var(--ease-out), opacity 0.2s ease;
+}
+.update-notice {
+  animation: notice-in 0.32s var(--ease-out);
+}
+.update-notice.closing {
+  animation: notice-out 0.22s ease forwards;
+}
+@keyframes notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+@keyframes notice-out {
+  to {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+.completion-notice {
+  animation: notice-center-in 0.32s var(--ease-out);
+}
+.completion-notice.closing {
+  animation: notice-center-out 0.22s ease forwards;
+}
+@keyframes notice-center-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 14px);
+  }
+}
+@keyframes notice-center-out {
+  to {
+    opacity: 0;
+    transform: translate(-50%, 10px);
+  }
+}
+
+/* 下拉菜单与视图选项弹层 */
+.download-menu {
+  transform-origin: top right;
+  animation: menu-in 0.18s var(--ease-out);
+}
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+}
+.view-options-panel {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
+  transform-origin: top right;
+  transition: opacity 0.18s ease, transform 0.18s var(--ease-out), overlay 0.18s allow-discrete, display 0.18s allow-discrete;
+}
+.view-options-panel:popover-open {
+  opacity: 1;
+  transform: none;
+}
+@starting-style {
+  .view-options-panel:popover-open {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+
+/* 折叠内容（更新说明、种子文件等）：高度平滑展开收起 */
+details:not(.download-more)::details-content {
+  block-size: 0;
+  overflow: clip;
+  transition: block-size 0.3s var(--ease-out), content-visibility 0.3s allow-discrete;
+}
+details:not(.download-more)[open]::details-content {
+  block-size: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0s !important;
+    transition-duration: 1ms !important;
+  }
+  .seg-indeterminate {
+    animation: none !important;
+    width: 100%;
+    opacity: 0.3;
+  }
+}

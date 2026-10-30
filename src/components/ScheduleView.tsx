@@ -5,6 +5,7 @@ import { dateTime } from "../lib/format";
 import { useStore } from "../store";
 import { SettingsTabs } from "./BtSettingsView";
 import { Switch } from "./ui";
+import { useLatest, usePresence } from "./Animated";
 
 const time = (n: number) => `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
 const minute = (v: string) => { const [h, m] = v.split(":").map(Number); return h * 60 + m; };
@@ -22,11 +23,14 @@ export function useCompletion() {
 }
 
 export function CompletionNotice() {
-  const status = useCompletion(); const [now, setNow] = useState(Date.now());
+  const live = useCompletion(); const [now, setNow] = useState(Date.now());
   const toast = useStore(s => s.showToast);
+  const show = !!(live?.deadline || live?.error);
+  const { mounted, closing } = usePresence(show, 220);
+  const status = useLatest(live, show);
   useEffect(() => { if (!status?.deadline) return; setNow(Date.now()); const timer = setInterval(() => setNow(Date.now()), 250); return () => clearInterval(timer); }, [status?.deadline]);
-  if (!status?.deadline && !status?.error) return null;
-  return <div className="completion-notice glass-strong" role="alert"><Power size={18} /><div><b>{status.error ? "电源操作未执行" : `${Math.max(0, Math.ceil((status.deadline! - now) / 1000))} 秒后${actionName(status.action)}`}</b><p className="muted small">{status.error || "全部任务已完成，可取消本次操作"}</p></div><button className="btn glass" onClick={() => void api.armCompletion(null).catch(e => toast(String(e)))}>{status.error ? "关闭" : "取消"}</button></div>;
+  if (!mounted || !status) return null;
+  return <div className={`completion-notice glass-strong ${closing ? "closing" : ""}`} role="alert"><Power size={18} /><div><b>{status.error ? "电源操作未执行" : `${Math.max(0, Math.ceil((status.deadline! - now) / 1000))} 秒后${actionName(status.action)}`}</b><p className="muted small">{status.error || "全部任务已完成，可取消本次操作"}</p></div><button className="btn glass" onClick={() => void api.armCompletion(null).catch(e => toast(String(e)))}>{status.error ? "关闭" : "取消"}</button></div>;
 }
 
 export function ScheduleView() {

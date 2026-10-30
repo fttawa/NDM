@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { api, type UpdateInfo } from "../lib/api";
 import { bytes } from "../lib/format";
+import { useLatest, usePresence } from "./Animated";
 
 export const updateLabels: Record<UpdateInfo["phase"], string> = {
   idle: "尚未检查", checking: "正在检查更新", current: "当前已是最新版本", available: "新版本待更新",
@@ -21,7 +22,10 @@ export function useUpdateStatus() {
 }
 
 export function UpdateNotice() {
-  const [status] = useUpdateStatus();
-  if (!status || !["downloading", "verifying", "saving", "installing"].includes(status.phase)) return null;
-  return <div className="update-notice glass" role="status"><RefreshCw size={16} /><div><b>{updateLabels[status.phase]}</b><p className="muted small">v{status.version}{status.phase === "downloading" ? ` · ${bytes(status.downloaded)} / ${bytes(status.total)}` : " · 安装后自动恢复原有下载任务"}</p></div></div>;
+  const [live] = useUpdateStatus();
+  const show = !!live && ["downloading", "verifying", "saving", "installing"].includes(live.phase);
+  const { mounted, closing } = usePresence(show, 220);
+  const status = useLatest(live, show);
+  if (!mounted || !status) return null;
+  return <div className={`update-notice glass ${closing ? "closing" : ""}`} role="status"><RefreshCw size={16} /><div><b>{updateLabels[status.phase]}</b><p className="muted small">v{status.version}{status.phase === "downloading" ? ` · ${bytes(status.downloaded)} / ${bytes(status.total)}` : " · 安装后自动恢复原有下载任务"}</p></div></div>;
 }

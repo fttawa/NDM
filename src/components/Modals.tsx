@@ -4,6 +4,7 @@ import { api, pickDirectory, pickTorrentFile, type HlsInfo } from "../lib/api";
 import { bytes, extractUrls } from "../lib/format";
 import { useStore } from "../store";
 import { Slider, Switch } from "./ui";
+import { useLatest, usePresence } from "./Animated";
 
 export function Modal({ open, onClose, children, width = 560 }: { open: boolean; onClose: () => void; children: React.ReactNode; width?: number }) {
   useEffect(() => {
@@ -12,11 +13,14 @@ export function Modal({ open, onClose, children, width = 560 }: { open: boolean;
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
-  if (!open) return null;
+  const { mounted, closing } = usePresence(open, 180);
+  // 退场时数据可能已清空，沿用关闭前的内容
+  const content = useLatest(children, open);
+  if (!mounted) return null;
   return (
-    <div className="modal-mask" onMouseDown={onClose}>
+    <div className={`modal-mask ${closing ? "closing" : ""}`} onMouseDown={closing ? undefined : onClose}>
       <div className="modal glass-strong" style={{ width }} onMouseDown={(e) => e.stopPropagation()}>
-        {children}
+        {content}
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useSlidingIndicator } from "./Animated";
 
 export function Switch({ checked, onChange, label, disabled }: { checked: boolean; onChange: (v: boolean) => void; label?: string; disabled?: boolean }) {
   return (
@@ -73,8 +74,9 @@ export function Segmented<T extends string>({
   options: { value: T; label: ReactNode; count?: number }[];
   onChange: (v: T) => void;
 }) {
+  const ref = useSlidingIndicator<HTMLDivElement>("button.active", value);
   return (
-    <div className="segmented glass">
+    <div ref={ref} className="segmented glass">
       {options.map((o) => (
         <button key={o.value} type="button" className={o.value === value ? "active" : ""} onClick={() => onChange(o.value)}>
           {o.label}

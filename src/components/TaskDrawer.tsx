@@ -2,17 +2,19 @@ import { Copy, ExternalLink, FolderOpen, Pause, Play, RotateCcw, Trash2, X } fro
 import { api, writeClipboard } from "../lib/api";
 import { bytes, dateTime, eta, percent, speed } from "../lib/format";
 import { useStore } from "../store";
-import { AnimatedNumber } from "./Animated";
+import { AnimatedNumber, useLatest } from "./Animated";
 import { FileIcon, SegmentBar, StatusChip, fileKind } from "./TaskCard";
 import { TaskSchedule } from "./ScheduleView";
 
 export function TaskDrawer() {
   const id = useStore((s) => s.selectedId);
-  const task = useStore((s) => s.tasks.find((t) => t.id === s.selectedId && !t.torrent));
+  const current = useStore((s) => s.tasks.find((t) => t.id === s.selectedId && !t.torrent));
   const select = useStore((s) => s.select);
   const askRemove = useStore((s) => s.askRemove);
   const showToast = useStore((s) => s.showToast);
-  const open = !!id && !!task;
+  const open = !!id && !!current;
+  // 抽屉滑出时内容保持不变，不会先变空
+  const task = useLatest(current, open);
 
   const pct = task ? percent(task.status === "completed" ? task.total ?? 0 : task.downloaded, task.total) : 0;
 
@@ -21,7 +23,7 @@ export function TaskDrawer() {
       <div className={`drawer-mask ${open ? "show" : ""}`} onClick={() => select(null)} />
       <aside className={`drawer glass-strong ${open ? "show" : ""}`}>
         {task && (
-          <>
+          <div className="drawer-body" key={task.id}>
             <div className="drawer-head">
               <FileIcon name={task.fileName} size={52} />
               <div className="drawer-title">
@@ -139,7 +141,7 @@ export function TaskDrawer() {
               </button>
             </div>
             <TaskSchedule task={task} />
-          </>
+          </div>
         )}
       </aside>
     </>

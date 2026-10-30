@@ -1,6 +1,6 @@
 import { Inbox, Layers, MoreHorizontal, Pause, Play, Plus, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
-import { useEffect } from "react";
-import { useFlip } from "./Animated";
+import { useEffect, useRef } from "react";
+import { useFlip, useLeaving, useSlidingIndicator } from "./Animated";
 import { api, type Task } from "../lib/api";
 import { arrangeTasks, taskGroup } from "../lib/task-list";
 import { TaskViewOptions } from "./TaskViewOptions";
@@ -58,9 +58,17 @@ export function TasksView() {
   const openAdd = useStore((s) => s.openAdd);
   const options = useStore(s => s.settings?.taskView);
   const list = arrangeTasks(filterTasks(tasks, filter), options);
-  const groups = new Map<string, Task[]>();
-  for (const task of list) { const key = taskGroup(task, options?.group ?? "none"); const group = groups.get(key) ?? []; group.push(task); groups.set(key, group); }
-  const flipRef = useFlip(`${filter}|${list.map((t) => t.id).join(",")}`);
+  // 移除的任务先在原位淡出，再由 FLIP 让其余卡片补位；切换筛选时直接替换
+  const shown = useLeaving(list, filter);
+  const groups = new Map<string, typeof shown>();
+  for (const entry of shown) { const key = taskGroup(entry.item, options?.group ?? "none"); const group = groups.get(key) ?? []; group.push(entry); groups.set(key, group); }
+  const flipRef = useFlip(`${filter}|${shown.map((e) => e.item.id).join(",")}`);
+  const filtersRef = useSlidingIndicator<HTMLDivElement>("button.active", filter);
+  // 首次进入与切换筛选时，前几张卡片依次淡入；之后新增的任务不延迟
+  const stagger = useRef({ filter, until: performance.now() + 900 });
+  if (stagger.current.filter !== filter) stagger.current = { filter, until: performance.now() + 900 };
+  const staggering = performance.now() < stagger.current.until;
+  let order = 0;
   const checkedCount = useStore((s) => s.checked.length);
 
   // 切换筛选后，只保留当前列表中可见的选中项
@@ -85,7 +93,7 @@ export function TasksView() {
       </header>
 
       <div className="toolbar">
-        <div className="download-filters" role="group" aria-label="下载状态">
+        <div ref={filtersRef} className="download-filters" role="group" aria-label="下载状态">
           {DOWNLOAD_FILTERS.map(({ value, label }) => <button key={value} className={filter === value ? "active" : ""} aria-pressed={filter === value} onClick={() => setFilter(value)}>{value === "all" ? "全部" : value === "error" ? "失败" : label}</button>)}
         </div>
         {checkedCount > 0 ? (
@@ -108,21 +116,30 @@ export function TasksView() {
         )}
       </div>
 
-      {list.length === 0 ? (
-        <div className="empty glass">
+      {shown.length === 0 ? (
+        <div className="empty glass" key={`empty-${filter}`}>
           {filter === "all" ? <Layers size={40} strokeWidth={1.4} /> : <Inbox size={40} strokeWidth={1.4} />}
           <div className="empty-title">{filter === "all" ? "还没有下载任务" : "这里空空如也"}</div>
           <div className="muted">点击「新建任务」，或直接按 Ctrl+V 粘贴链接</div>
         </div>
       ) : (
-        <div className="task-groups">{Array.from(groups, ([group, items]) => <section key={group}>
-          {group && <h2 className="task-group-title">{group}<span className="muted small">{items.length}</span></h2>}
+        <div className="task-groups" key={filter}>{Array.from(groups, ([group, items]) => <section key={group} className="task-group">
+          {group && <h2 className="task-group-title">{group}<span className="muted small">{items.filter((e) => !e.leaving).length}</span></h2>}
           <div className={options?.layout === "list" ? "task-list" : "task-grid"}>
-          {items.map((t) => (
-            <div key={t.id} ref={flipRef(t.id)} className="flip-item">
-              <TaskCard task={t} compact={options?.layout === "list"} />
-            </div>
-          ))}
+          {items.map(({ item: t, leaving }) => {
+            const i = order++;
+            return (
+              <div
+                key={t.id}
+                ref={flipRef(t.id)}
+                className={`flip-item ${leaving ? "leaving" : ""}`}
+                aria-hidden={leaving || undefined}
+                style={staggering && i < 12 ? { ["--stagger" as string]: `${i * 35}ms` } : undefined}
+              >
+                <TaskCard task={t} compact={options?.layout === "list"} />
+              </div>
+            );
+          })}
           </div></section>)}</div>
       )}
     </div>
