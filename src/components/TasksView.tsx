@@ -8,6 +8,20 @@ import { bytes } from "../lib/format";
 import { DOWNLOAD_FILTERS, filterTasks, useStore } from "../store";
 import { TaskCard } from "./TaskCard";
 
+/** 收起「更多」菜单：先播放退场动画再真正关闭 */
+function closeMenu(details: HTMLDetailsElement) {
+  if (!details.open || details.classList.contains("closing")) return;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    details.open = false;
+    return;
+  }
+  details.classList.add("closing");
+  window.setTimeout(() => {
+    details.classList.remove("closing");
+    details.open = false;
+  }, 140);
+}
+
 /** 批量操作栏：有选中任务时替换工具栏右侧按钮 */
 function BulkBar({ visible }: { visible: Task[] }) {
   const checked = useStore((s) => s.checked);
@@ -100,8 +114,18 @@ export function TasksView() {
           <BulkBar visible={list} />
         ) : (
         <details className="download-more" key={filter}>
-          <summary aria-label="更多下载操作"><MoreHorizontal size={20} /></summary>
-          <div className="download-menu glass-strong" onClick={(event) => event.currentTarget.parentElement?.removeAttribute("open")}>
+          <summary
+            aria-label="更多下载操作"
+            onClick={(event) => {
+              const details = event.currentTarget.parentElement as HTMLDetailsElement;
+              if (!details.open) return;
+              event.preventDefault();
+              closeMenu(details);
+            }}
+          >
+            <MoreHorizontal size={20} />
+          </summary>
+          <div className="download-menu glass-strong" onClick={(event) => closeMenu(event.currentTarget.parentElement as HTMLDetailsElement)}>
           <button className="btn glass" onClick={() => api.resumeAll()}>
             <Play size={15} /> 全部开始
           </button>

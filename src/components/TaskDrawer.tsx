@@ -2,6 +2,7 @@ import { Copy, ExternalLink, FolderOpen, Pause, Play, RotateCcw, Trash2, X } fro
 import { api, writeClipboard } from "../lib/api";
 import { bytes, dateTime, eta, percent, speed } from "../lib/format";
 import { useStore } from "../store";
+import { useRef } from "react";
 import { AnimatedNumber, useLatest } from "./Animated";
 import { FileIcon, SegmentBar, StatusChip, fileKind } from "./TaskCard";
 import { TaskSchedule } from "./ScheduleView";
@@ -15,6 +16,10 @@ export function TaskDrawer() {
   const open = !!id && !!current;
   // 抽屉滑出时内容保持不变，不会先变空
   const task = useLatest(current, open);
+  // 每次打开计数一次，用作内容的 key：重新打开同一任务也会重播淡入，关闭途中则保持不变
+  const opens = useRef({ open: false, n: 0 });
+  if (open && !opens.current.open) opens.current.n++;
+  opens.current.open = open;
 
   const pct = task ? percent(task.status === "completed" ? task.total ?? 0 : task.downloaded, task.total) : 0;
 
@@ -23,7 +28,7 @@ export function TaskDrawer() {
       <div className={`drawer-mask ${open ? "show" : ""}`} onClick={() => select(null)} />
       <aside className={`drawer glass-strong ${open ? "show" : ""}`}>
         {task && (
-          <div className="drawer-body" key={task.id}>
+          <div className="drawer-body" key={`${task.id}-${opens.current.n}`}>
             <div className="drawer-head">
               <FileIcon name={task.fileName} size={52} />
               <div className="drawer-title">

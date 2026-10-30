@@ -1948,10 +1948,23 @@ button {
   }
 }
 
-/* 下拉菜单与视图选项弹层 */
+/* 下拉菜单与视图选项弹层
+   details 收起时内容只是隐藏、并未卸载，动画必须挂在 [open] 上才会在每次打开时播放 */
 .download-menu {
   transform-origin: top right;
+}
+.download-more[open] .download-menu {
   animation: menu-in 0.18s var(--ease-out);
+}
+.download-more.closing .download-menu {
+  pointer-events: none;
+  animation: menu-out 0.14s ease forwards;
+}
+@keyframes menu-out {
+  to {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
 }
 @keyframes menu-in {
   from {
