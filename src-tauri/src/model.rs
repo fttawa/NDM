@@ -33,6 +33,8 @@ pub struct Task {
     pub downloaded: u64,
     pub status: Status,
     #[serde(default)]
+    pub scheduled_at: Option<u64>,
+    #[serde(default)]
     pub resumable: bool,
     /// 服务器不支持分段时强制单连接
     #[serde(default)]
@@ -48,6 +50,8 @@ pub struct Task {
     pub finished_at: Option<u64>,
     pub error: Option<String>,
     pub mime: Option<String>,
+    #[serde(default)]
+    pub http_identity: HttpIdentity,
     /// 附加请求头（浏览器扩展传入的 Cookie、Referer、User-Agent），续传时继续使用
     #[serde(default)]
     pub headers: Vec<(String, String)>,
@@ -66,9 +70,71 @@ pub struct Task {
     pub resume_after_update: bool,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct HttpIdentity {
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+}
+
+impl HttpIdentity {
+    fn strong_etag(&self) -> Option<&str> {
+        self.etag.as_deref().filter(|v| {
+            v.len() >= 2
+                && v.starts_with('"')
+                && v.ends_with('"')
+                && v.as_bytes()[1..v.len() - 1]
+                    .iter()
+                    .all(|b| *b == 0x21 || (0x23..=0x7e).contains(b))
+        })
+    }
+
+    pub fn validator(&self) -> Option<&str> {
+        self.strong_etag().or(self.last_modified.as_deref())
+    }
+
+    pub fn matches(&self, other: &Self) -> bool {
+        if let Some(etag) = self.strong_etag() {
+            other.etag.as_deref() == Some(etag)
+        } else if let Some(modified) = &self.last_modified {
+            other.last_modified.as_ref() == Some(modified)
+        } else {
+            false
+        }
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::HttpIdentity;
+
+    #[test]
+    fn resume_requires_strong_etag_or_matching_last_modified() {
+        let identity = |etag: &str, modified: Option<&str>| HttpIdentity {
+            etag: Some(etag.into()),
+            last_modified: modified.map(str::to_owned),
+        };
+        let date = Some("Fri, 30 Oct 2026 10:00:00 GMT");
+        let strong = identity("\"v1\"", date);
+        assert_eq!(strong.validator(), Some("\"v1\""));
+        assert!(!strong.matches(&identity("\"v2\"", date)));
+        assert!(strong.matches(&identity("\"v1\"", None)));
+        for invalid in ["", "v1", "W/\"v1\"", "\"bad\"etag\"", "\"bad\netag\""] {
+            assert!(identity(invalid, None).validator().is_none());
+            assert!(!identity(invalid, None).matches(&identity(invalid, None)));
+            assert_eq!(identity(invalid, date).validator(), date);
+            assert!(identity(invalid, date).matches(&identity("W/\"v2\"", date)));
+        }
+        assert!(!HttpIdentity::default().matches(&HttpIdentity::default()));
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
+    pub capture_on_top: bool,
+    pub task_view: TaskView,
+    pub download_window: crate::schedule::DownloadWindow,
     pub download_dir: String,
     pub max_concurrent: u32,
     pub connections: u32,
@@ -99,6 +165,9 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            capture_on_top: false,
+            task_view: Default::default(),
+            download_window: Default::default(),
             download_dir: String::new(),
             max_concurrent: 3,
             connections: 8,
@@ -118,6 +187,38 @@ impl Default for Settings {
             auto_update: true,
             update_mirrors: true,
         }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TaskView {
+    pub layout: String,
+    pub sort: String,
+    pub descending: bool,
+    pub group: String,
+    pub show_percentage: bool,
+}
+impl Default for TaskView {
+    fn default() -> Self {
+        Self {
+            layout: "cards".into(),
+            sort: "created".into(),
+            descending: true,
+            group: "none".into(),
+            show_percentage: true,
+        }
+    }
+}
+impl TaskView {
+    pub fn validate(&self) -> Result<(), String> {
+        if !["cards", "list"].contains(&self.layout.as_str())
+            || !["created", "name", "type", "size"].contains(&self.sort.as_str())
+            || !["none", "date", "type", "status"].contains(&self.group.as_str())
+        {
+            return Err("下载视图配置无效".into());
+        }
+        Ok(())
     }
 }
 
@@ -145,4 +246,26 @@ pub fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+
+    #[test]
+    fn old_settings_gain_safe_schedule_and_view_defaults() {
+        let settings: Settings = serde_json::from_value(serde_json::json!({
+            "downloadDir": "C:/Downloads", "captureConfirm": true
+        }))
+        .unwrap();
+        assert!(!settings.capture_on_top);
+        assert!(!settings.download_window.enabled);
+        assert_eq!(settings.task_view.layout, "cards");
+        assert!(settings.task_view.show_percentage);
+        assert!(settings.task_view.validate().is_ok());
+        assert!(settings.download_window.validate().is_ok());
+        let mut view = settings.task_view;
+        view.group = "unknown".into();
+        assert!(view.validate().is_err());
+    }
 }

@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { memo, useRef } from "react";
 import { api, type Segment, type Status, type Task } from "../lib/api";
-import { bytes, eta, percent, speed } from "../lib/format";
+import { bytes, dateTime, eta, percent, speed } from "../lib/format";
 import { useStore } from "../store";
 import { AnimatedNumber } from "./Animated";
 import { IconButton } from "./ui";
@@ -121,7 +121,8 @@ export function SegmentBar({ task, tall }: { task: Task; tall?: boolean }) {
 
 const fmtPct = (n: number) => `${n.toFixed(1)}%`;
 
-function TaskCardInner({ task }: { task: Task }) {
+function TaskCardInner({ task, compact = false }: { task: Task; compact?: boolean }) {
+  const showPercentage = useStore(s => s.settings?.taskView.showPercentage ?? true);
   const select = useStore((s) => s.select);
   const askRemove = useStore((s) => s.askRemove);
   const toggleCheck = useStore((s) => s.toggleCheck);
@@ -140,7 +141,7 @@ function TaskCardInner({ task }: { task: Task }) {
 
   return (
     <div
-      className={`task-card glass st-${task.status} ${checked ? "checked" : ""} ${selecting ? "selecting" : ""}`}
+      className={`task-card glass st-${task.status} ${compact ? "compact" : ""} ${checked ? "checked" : ""} ${selecting ? "selecting" : ""}`}
       onClick={(e) => (selecting ? toggleCheck(task.id, e.shiftKey) : select(task.id))}
     >
       <div className="task-head">
@@ -172,7 +173,7 @@ function TaskCardInner({ task }: { task: Task }) {
             ) : (
               <>
                 <AnimatedNumber value={task.downloaded} format={bytes} /> / {bytes(task.total)}
-                {task.total ? <AnimatedNumber className="pct" value={pct} format={fmtPct} /> : null}
+                {showPercentage && task.total ? <AnimatedNumber className="pct" value={pct} format={fmtPct} /> : null}
               </>
             )}
           </div>
@@ -180,7 +181,8 @@ function TaskCardInner({ task }: { task: Task }) {
         <StatusChip status={task.status} />
       </div>
 
-      <SegmentBar task={task} />
+      {task.status !== "completed" && <SegmentBar task={task} />}
+      {compact && <div className="task-list-details"><span title="添加时间">{dateTime(task.createdAt)}</span><span className="ellipsis mono" title={task.saveDir}>{task.saveDir}</span></div>}
 
       <div className="task-foot">
         <div className="meta">
@@ -193,7 +195,7 @@ function TaskCardInner({ task }: { task: Task }) {
               </span>
             </>
           )}
-          {task.status === "waiting" && <span>排队等待中…</span>}
+          {task.status === "waiting" && <span>{task.scheduledAt ? `定时 ${dateTime(task.scheduledAt)}` : "排队 / 等待允许下载时段…"}</span>}
           {task.torrent && task.status === "active" && task.total == null && <span>正在解析磁力元数据…</span>}
           {task.torrent && task.status === "active" && task.total != null && task.activeConns === 0 && <span>校验文件 / 寻找 Peer…</span>}
           {task.status === "paused" && <span>{task.hls ? "HLS · 继续时从头下载" : task.resumable ? "可断点续传" : "不支持续传，将重新下载"}</span>}
@@ -201,6 +203,7 @@ function TaskCardInner({ task }: { task: Task }) {
           {task.status === "completed" && <span>保存于 {task.saveDir}</span>}
         </div>
         <div className="actions">
+          {task.status === "error" && !task.hls && !task.torrent && <button className="btn glass" onClick={stop(() => useStore.getState().refreshLink(task.id))}>更新链接</button>}
           {canPause && (
             <IconButton title="暂停" onClick={stop(() => api.pause([task.id]))}>
               <Pause size={16} />

@@ -19,6 +19,7 @@ export interface Task {
   total: number | null;
   downloaded: number;
   status: Status;
+  scheduledAt?: number | null;
   resumable: boolean;
   segments: Segment[];
   connections: number;
@@ -46,6 +47,9 @@ export interface Progress {
 }
 
 export interface Settings {
+  captureOnTop: boolean;
+  taskView: TaskViewOptions;
+  downloadWindow: { enabled: boolean; start: number; end: number };
   downloadDir: string;
   maxConcurrent: number;
   connections: number;
@@ -67,6 +71,16 @@ export interface Settings {
   updateMirrors: boolean;
 }
 
+export interface TaskViewOptions {
+  layout: "cards" | "list";
+  sort: "created" | "name" | "type" | "size";
+  descending: boolean;
+  group: "none" | "date" | "type" | "status";
+  showPercentage: boolean;
+}
+export type PowerAction = "shutdown" | "sleep";
+export interface CompletionStatus { action: PowerAction | null; deadline: number | null; error: string | null }
+
 export interface BtSettings {
   dht: boolean;
   pex: boolean;
@@ -76,9 +90,11 @@ export interface BtSettings {
   uploadLimit: number;
   bootstrapNodes: string[];
   trackers: string[];
+  proxy: { enabled: boolean; host: string; port: number; username: string; password: string };
 }
 
 export interface BtRuntime {
+  proxy: boolean;
   phase: "metadata" | "checking" | "preparing" | "downloading";
   peers: number;
   seeds: number;
@@ -156,6 +172,7 @@ export interface BridgeStatus {
 }
 
 export interface AddOptions {
+  scheduledAt?: number | null;
   saveDir?: string;
   fileName?: string;
   /** 与 urls 一一对应的文件名 */
@@ -195,8 +212,13 @@ const tauriBackend: Backend = {
 const backend: Backend = isTauri ? tauriBackend : createMock();
 
 export const api = {
+  setTaskSchedule: (id: string, at: number | null) => backend.call<void>("set_task_schedule", { id, at }),
+  completionStatus: () => backend.call<CompletionStatus>("completion_status"),
+  armCompletion: (action: PowerAction | null) => backend.call<void>("arm_completion", { action }),
+  onCompletion: (cb: (status: CompletionStatus) => void) => backend.on("ndm://completion", cb),
   getTasks: () => backend.call<Task[]>("get_tasks"),
   getSettings: () => backend.call<Settings>("get_settings"),
+  onSettings: (cb: (settings: Settings) => void) => backend.on("ndm://settings", cb),
   btDefaults: () => backend.call<BtSettings>("bt_defaults"),
   btDetails: (id: string) => backend.call<BtRuntime | null>("bt_details", { id }),
   btMetadata: (id: string) => backend.call<void>("bt_metadata", { id }),
@@ -206,6 +228,7 @@ export const api = {
   addTorrentFile: (path: string, options: AddOptions) => backend.call<Task[]>("add_torrent_file", { path, options }),
   pause: (ids: string[]) => backend.call<void>("pause_tasks", { ids }),
   resume: (ids: string[]) => backend.call<void>("resume_tasks", { ids }),
+  refreshLink: (id: string, url: string, restart = false) => backend.call<void>("refresh_link", { id, url, restart }),
   remove: (ids: string[], deleteFile: boolean) => backend.call<void>("remove_tasks", { ids, deleteFile }),
   pauseAll: () => backend.call<void>("pause_all"),
   resumeAll: () => backend.call<void>("resume_all"),
@@ -343,6 +366,9 @@ function createMock(): Backend {
     glass: "acrylic",
     browserIntegration: true,
     captureConfirm: true,
+    captureOnTop: false,
+    taskView: { layout: "cards", sort: "created", descending: true, group: "none", showPercentage: true },
+    downloadWindow: { enabled: false, start: 0, end: 480 },
     overclock: true,
     proxyMode: "system",
     proxyUrl: "",
@@ -350,6 +376,7 @@ function createMock(): Backend {
       dht: true, pex: true, lsd: false, upnp: false, maxPeers: 80, uploadLimit: 0,
       bootstrapNodes: ["dht.libtorrent.org:25401", "router.bittorrent.com:6881", "router.utorrent.com:6881"],
       trackers: ["udp://tracker.opentrackr.org:1337/announce", "udp://open.stealth.si:80/announce", "udp://tracker.torrent.eu.org:451/announce"],
+      proxy: { enabled: false, host: "127.0.0.1", port: 1080, username: "", password: "" },
     },
   };
   const MB = 1024 * 1024;
@@ -472,6 +499,11 @@ function createMock(): Backend {
           return clone() as never;
         case "get_settings":
           return { ...settings } as never;
+        case "completion_status":
+          return { action: null, deadline: null, error: null } as never;
+        case "arm_completion":
+        case "set_task_schedule":
+          throw new Error("请在桌面应用中使用计划任务与电源操作");
         case "bt_defaults":
           return structuredClone(btDefaults) as never;
         case "bt_details": {
@@ -480,12 +512,13 @@ function createMock(): Backend {
           return {
             phase: "downloading", peers: 12, seeds: 3, uploadSpeed: 48 * 1024, uploaded: 8 * MB,
             dhtNodes: settings.bt.dht ? 143 : 0, pieces: 110, totalPieces: 256, fileProgress: task.torrent.files.map((_, i) => Math.round((task.torrent?.fileSizes?.[i] ?? 0) * .42)),
-            dht: settings.bt.dht, pex: settings.bt.pex, private: false, maxPeers: settings.bt.maxPeers, uploadLimit: settings.bt.uploadLimit,
+            dht: settings.bt.dht, pex: settings.bt.pex, proxy: settings.bt.proxy.enabled, private: false, maxPeers: settings.bt.maxPeers, uploadLimit: settings.bt.uploadLimit,
             trackers: settings.bt.trackers.map(url => ({url, state: "working", message: ""})),
           } as never;
         }
         case "set_settings":
           settings = a.settings;
+          emit("ndm://settings", settings);
           return settings as never;
         case "add_tasks": {
           const urls = a.urls as string[];
@@ -515,6 +548,8 @@ function createMock(): Backend {
             }
           });
           return undefined as never;
+        case "refresh_link":
+          throw new Error("浏览器预览不连接下载服务器，请在桌面应用中验证新链接");
         case "pause_all":
           update(tasks.map((t) => t.id), (t) => {
             if (t.status === "active" || t.status === "waiting") t.status = "paused";

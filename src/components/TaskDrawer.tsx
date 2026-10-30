@@ -4,6 +4,7 @@ import { bytes, dateTime, eta, percent, speed } from "../lib/format";
 import { useStore } from "../store";
 import { AnimatedNumber } from "./Animated";
 import { FileIcon, SegmentBar, StatusChip, fileKind } from "./TaskCard";
+import { TaskSchedule } from "./ScheduleView";
 
 export function TaskDrawer() {
   const id = useStore((s) => s.selectedId);
@@ -41,7 +42,7 @@ export function TaskDrawer() {
                   <AnimatedNumber value={task.status === "completed" ? task.total ?? 0 : task.downloaded} format={bytes} /> / {bytes(task.total)}
                 </span>
               </div>
-              <SegmentBar task={task} tall />
+              {task.status !== "completed" && <SegmentBar task={task} tall />}
               <div className="dp-meta">
                 <div>
                   <span className="muted">速度</span>
@@ -109,6 +110,7 @@ export function TaskDrawer() {
             {task.torrent && task.torrent.files.length > 0 && <details className="field"><summary>种子文件（{task.torrent.files.length}）</summary><ul className="small">{task.torrent.files.map(file => <li key={file} style={{ overflowWrap: "anywhere" }}>{file}</li>)}</ul></details>}
 
             <div className="drawer-actions">
+              {!task.hls && (task.status === "paused" || task.status === "error") && <button className="btn glass" onClick={() => useStore.getState().refreshLink(task.id)}>更新链接</button>}
               {(task.status === "active" || task.status === "waiting") && (
                 <button className="btn glass" onClick={() => api.pause([task.id])}>
                   <Pause size={15} /> 暂停
@@ -136,6 +138,7 @@ export function TaskDrawer() {
                 <Trash2 size={15} /> 删除
               </button>
             </div>
+            <TaskSchedule task={task} />
           </>
         )}
       </aside>

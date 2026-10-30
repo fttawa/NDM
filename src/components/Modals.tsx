@@ -40,6 +40,8 @@ export function AddTaskModal() {
   const [name, setName] = useState("");
   const [conns, setConns] = useState(8);
   const [start, setStart] = useState(true);
+  const [scheduled, setScheduled] = useState(false);
+  const [scheduledAt, setScheduledAt] = useState("");
   const [busy, setBusy] = useState(false);
   const [hls, setHls] = useState(false);
   const [torrentPath, setTorrentPath] = useState("");
@@ -62,6 +64,7 @@ export function AddTaskModal() {
       setName(prefill.fileName ?? "");
       setConns(s?.connections ?? 8);
       setStart(true);
+      setScheduled(false); setScheduledAt("");
       setHls(!!prefill.hls);
       setTorrentPath("");
       // 拦截的下载直接聚焦「开始下载」，按回车即可确认
@@ -93,6 +96,8 @@ export function AddTaskModal() {
     if ((!urls.length && !torrentPath) || busy || inspecting) return;
     setBusy(true);
     try {
+      const at = scheduled ? new Date(scheduledAt).getTime() : null;
+      if (scheduled && (!at || !Number.isFinite(at) || at <= Date.now())) throw new Error("请选择未来的开始时间");
       const target = hlsMode && hlsVariant ? hlsVariant : urls[0];
       const headers = hlsMode && new URL(target).origin !== new URL(urls[0]).origin
         ? prefill.headers?.filter(([name]) => !["cookie", "authorization", "origin"].includes(name.toLowerCase()))
@@ -102,6 +107,7 @@ export function AddTaskModal() {
         fileName: torrentPath || urls.length === 1 ? name : undefined,
         connections: conns,
         start,
+        scheduledAt: at,
         headers,
         hls: hlsMode,
       };
@@ -156,7 +162,7 @@ export function AddTaskModal() {
         <div className="field-hint">{urls.length ? `识别到 ${urls.length} 个链接` : "未识别到链接"}</div>
       </div>}
 
-      {btMode && <p className="muted small field">BT 内容保存到独立文件夹，支持分片校验和续传，完成后自动停止做种。Peer 连接直连，不使用 HTTP 代理。</p>}
+      {btMode && <p className="muted small field">BT 内容保存到独立文件夹，支持分片校验和续传，完成后自动停止做种。可在 BT 配置中设置 SOCKS5 代理。</p>}
       {!btMode && urls.length === 1 && <div className="field hls-options">
         <label className="set-row"><span>HLS / m3u8 视频</span>{autoHls ? <span className="pill">已识别</span> : <Switch checked={hlsMode} onChange={setHls} />}</label>
         {hlsMode && <>
@@ -199,10 +205,8 @@ export function AddTaskModal() {
           </label>
           <Slider value={conns} min={1} max={32} onChange={setConns} />
         </div>}
-        <div className="field row">
-          <label>立即开始</label>
-          <Switch checked={start} onChange={setStart} />
-        </div>
+        <label className="field"><span>开始方式</span><select className="input" value={scheduled ? "scheduled" : start ? "now" : "paused"} onChange={e => { setScheduled(e.target.value === "scheduled"); setStart(e.target.value !== "paused"); }}><option value="now">立即开始</option><option value="scheduled">定时开始</option><option value="paused">暂不开始</option></select></label>
+        {scheduled && <label className="field span-2"><span>计划开始时间</span><input className="input" type="datetime-local" required value={scheduledAt} onChange={e => setScheduledAt(e.target.value)} /></label>}
       </div>
 
       <div className="modal-foot">
@@ -211,7 +215,7 @@ export function AddTaskModal() {
           取消
         </button>
         <button ref={startRef} className="btn primary" disabled={(!urls.length && !torrentPath) || busy || inspecting} onClick={submit}>
-          开始下载
+          {scheduled ? "添加计划任务" : start ? "开始下载" : "添加任务"}
         </button>
       </div>
     </Modal>
@@ -261,4 +265,37 @@ export function ConfirmRemoveModal() {
       </div>
     </Modal>
   );
+}
+
+export function RefreshLinkModal() {
+  const id = useStore(s => s.refreshId);
+  const task = useStore(s => s.tasks.find(t => t.id === s.refreshId));
+  const closeModal = useStore(s => s.refreshLink);
+  const toast = useStore(s => s.showToast);
+  const [url, setUrl] = useState("");
+  const [restart, setRestart] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => { setUrl(""); setRestart(false); setError(""); }, [id]);
+  const close = () => { if (!busy) closeModal(null); };
+  const allowed = !!task && !task.hls && !task.torrent && ["paused", "error"].includes(task.status);
+  return <Modal open={!!id} onClose={close}>
+    <form onSubmit={async event => {
+      event.preventDefault(); if (!task || !allowed || busy || !url.trim()) return;
+      setBusy(true); setError("");
+      try {
+        await api.refreshLink(task.id, url, restart);
+        toast(restart ? "链接已更新，进度已重置，点击继续开始下载" : "链接已更新，已有分段已保留，点击继续下载");
+        closeModal(null);
+      } catch (e) { setError(String(e)); } finally { setBusy(false); }
+    }}>
+      <div className="modal-head"><div className="modal-icon"><Link2 size={18} /></div><div><h2>更新下载链接</h2><p className="muted ellipsis">{task?.fileName ?? "任务已移除"}</p></div><button type="button" className="icon-btn ghost" disabled={busy} onClick={close} aria-label="关闭"><X size={18} /></button></div>
+      <label className="field"><span>新的下载链接</span><input className="input mono" type="url" required autoFocus disabled={busy} value={url} placeholder="https://…" onChange={e => { setUrl(e.target.value); setError(""); }} /></label>
+      <p className="muted small field">验证文件大小与 ETag / 修改时间后保留已有分段、文件名和保存目录。新链接属于其他站点时，不会转发旧站点的登录信息。</p>
+      <label className="check-row"><Switch label="从头下载，清除已有进度" checked={restart} disabled={busy} onChange={setRestart} /><span>从头下载，清除已有进度</span></label>
+      {!allowed && <p className="err" role="alert">请先暂停普通下载任务；已完成、HLS 和 BT 任务不支持更新链接。</p>}
+      {error && <p className="err" role="alert">{error}</p>}
+      <div className="modal-foot"><button type="button" className="btn glass" disabled={busy} onClick={close}>取消</button><button type="submit" className="btn primary" disabled={busy || !allowed || !url.trim()}>{busy ? "验证中…" : "验证并更新"}</button></div>
+    </form>
+  </Modal>;
 }

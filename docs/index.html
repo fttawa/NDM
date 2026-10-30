@@ -322,24 +322,24 @@
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
           <span>GitHub</span><b id="stars"></b>
         </a>
-        <a class="nav-dl dl-link" href="https://github.com/fttawa/NDM/releases/download/v0.3.1/NDM_0.3.1_x64-setup.exe">下载</a>
+        <a class="nav-dl dl-link" href="https://github.com/fttawa/NDM/releases/download/v0.3.2/NDM_0.3.2_x64-setup.exe">下载</a>
       </div>
     </div>
   </nav>
 
   <header class="hero">
     <div class="wrap">
-      <a class="badge glass" href="#changelog"><b class="ver">v0.3.1</b> 已发布 · BT 专属页面与签名自动更新</a>
+      <a class="badge glass" href="#changelog"><b class="ver">v0.3.2</b> 已发布 · 计划任务与紧凑下载列表</a>
       <h1>你的下一代<br />开源<em>高速</em>下载器</h1>
       <p class="lead">多连接加速、视频下载、磁力与 BT 种子，一个下载器就够了。支持 BTv2，接管浏览器下载，免费、开源、无广告。</p>
       <div class="cta">
-        <a class="btn primary dl-link" href="https://github.com/fttawa/NDM/releases/download/v0.3.1/NDM_0.3.1_x64-setup.exe">
+        <a class="btn primary dl-link" href="https://github.com/fttawa/NDM/releases/download/v0.3.2/NDM_0.3.2_x64-setup.exe">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
           下载 Windows 版
         </a>
         <a class="btn ghost" href="https://github.com/fttawa/NDM" target="_blank" rel="noopener">查看源码</a>
       </div>
-      <div class="meta" id="dl-meta">v0.3.1 · Windows 10 / 11 · x64 · 5.31 MiB</div>
+      <div class="meta" id="dl-meta">v0.3.2 · Windows 10 / 11 · x64</div>
 
       <div class="stage" id="stage">
         <div class="card3d" id="card3d">
@@ -515,12 +515,16 @@
       </div>
       <div class="log">
         <div class="log-item glass">
-          <div class="v">v0.3.1<span class="latest">最新</span><small>2026-10-30</small></div>
-          <ul><li>新增 BT 专属配置页，内置 DHT 引导节点与公共 Tracker，支持下载中应用配置</li><li>新增 BT 任务详情页，查看实时连接、文件与分片进度、Tracker 响应状态</li><li>配置随 SQLite 保存与备份；私有种子仅使用原有 Tracker，并禁用 DHT / PEX</li><li>签名自动更新，保存任务后静默安装并重启；GitHub 不可达时自动尝试镜像</li><li>默认 UA 跟随浏览器，更新说明支持代码样式，关于卡片展示内核与更新状态</li></ul>
+          <div class="v">v0.3.2<span class="latest">最新</span><small>2026-10-30</small></div>
+          <ul><li>新增过期链接刷新，校验文件身份后沿用已有分段</li><li>BT 独立 SOCKS5 代理，支持认证、Peer / Tracker / UDP 转发与自动重连</li><li>定时开始、每日下载时段，全部成功后可倒计时关机或睡眠</li><li>下载小窗默认不置顶，新增图钉开关与最小化按钮</li><li>紧凑列表、百分比开关、排序和分组；已完成任务移除进度条</li></ul>
         </div>
         <details class="log-history glass">
           <summary><span class="history-open">查看历史版本</span><span class="history-close">收起历史版本</span></summary>
           <div class="log history-log">
+            <div class="log-item glass">
+              <div class="v">v0.3.1<small>2026-10-30</small></div>
+              <ul><li>BT 专属配置与详情页，内置 DHT 与 Tracker，配置随 SQLite 备份</li><li>签名自动更新，保存任务后静默安装并重启；GitHub 不可达时自动尝试镜像</li><li>默认 UA 跟随浏览器，更新说明支持代码样式，关于卡片展示内核与更新状态</li></ul>
+            </div>
             <div class="log-item glass">
               <div class="v">v0.3.0<small>2026-10-29</small></div>
               <ul><li>新增磁力链接与 .torrent 文件下载，支持 BTv1、BTv2 和混合种子</li><li>BT 任务接入队列、限速、暂停续传与重启校验，元数据随 SQLite 备份保存</li><li>内置原生 C++ libtorrent 内核，无需 Python 运行时；Windows 安装包约 5.13 MiB</li></ul>
@@ -612,7 +616,7 @@
         <h2>现在就试试 NDM</h2>
         <p>免费、开源、无广告。</p>
         <div class="cta" style="margin-top:0">
-          <a class="btn primary dl-link" href="https://github.com/fttawa/NDM/releases/download/v0.3.1/NDM_0.3.1_x64-setup.exe">
+          <a class="btn primary dl-link" href="https://github.com/fttawa/NDM/releases/download/v0.3.2/NDM_0.3.2_x64-setup.exe">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
             下载 Windows 版
           </a>

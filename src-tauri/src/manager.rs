@@ -29,6 +29,7 @@ pub struct Manager {
     pending_import: Mutex<Option<(String, ExportBundle)>>,
     pub torrent_engine: crate::torrent::Engine,
     updating: AtomicBool,
+    completion: Mutex<crate::schedule::Completion>,
 }
 
 pub struct AddOptions {
@@ -41,6 +42,7 @@ pub struct AddOptions {
     pub headers: Vec<(String, String)>,
     pub hls: bool,
     pub torrent: Option<crate::torrent::Source>,
+    pub scheduled_at: Option<u64>,
 }
 
 /// 按设置构建 HTTP 客户端；自定义代理地址无效时返回错误
@@ -111,6 +113,8 @@ impl Manager {
         settings.max_concurrent = settings.max_concurrent.clamp(1, 16);
         settings.connections = settings.connections.clamp(1, 32);
         settings.bt.validate()?;
+        settings.task_view.validate()?;
+        settings.download_window.validate()?;
         crate::user_agent::migrate_legacy(&mut settings.user_agent);
 
         let mut tasks: Vec<Task> = match storage.load_tasks()? {
@@ -130,7 +134,8 @@ impl Manager {
             if matches!(t.status, Status::Active | Status::Waiting)
                 || (update_resume && t.status == Status::Paused)
             {
-                t.status = if settings.resume_on_start || update_resume {
+                t.status = if settings.resume_on_start || update_resume || t.scheduled_at.is_some()
+                {
                     Status::Waiting
                 } else {
                     Status::Paused
@@ -161,6 +166,7 @@ impl Manager {
             pending_import: Mutex::new(None),
             torrent_engine: Default::default(),
             updating: AtomicBool::new(false),
+            completion: Default::default(),
         }))
     }
 
@@ -174,6 +180,154 @@ impl Manager {
         self.settings.read().clone()
     }
 
+    pub fn completion_status(&self) -> crate::schedule::CompletionStatus {
+        self.completion.lock().status.clone()
+    }
+
+    pub fn arm_completion(
+        &self,
+        action: Option<crate::schedule::PowerAction>,
+    ) -> Result<(), String> {
+        let mut completion = self.completion.lock();
+        if action.is_some()
+            && !self
+                .tasks
+                .lock()
+                .iter()
+                .any(|t| t.status != Status::Completed)
+        {
+            return Err("请先添加未完成的下载任务".into());
+        }
+        completion.arm(action);
+        let _ = self.app.emit("ndm://completion", completion.status.clone());
+        Ok(())
+    }
+
+    fn completion_tick(self: &Arc<Self>) {
+        let mut completion = self.completion.lock();
+        if completion.status.action.is_none() {
+            return;
+        }
+        let old = completion.status.clone();
+        let active = self.active.lock();
+        let tasks = self.tasks.lock();
+        let updating = self.updating.load(Ordering::Acquire)
+            || self
+                .app
+                .try_state::<Arc<crate::updater::Updates>>()
+                .is_some_and(|u| {
+                    matches!(
+                        u.status().phase.as_str(),
+                        "downloading" | "verifying" | "saving" | "installing"
+                    )
+                });
+        let all_completed =
+            !tasks.is_empty() && tasks.iter().all(|t| t.status == Status::Completed);
+        let action = completion.tick(all_completed, active.is_empty(), updating, now_ms());
+        drop(tasks);
+        drop(active);
+        if old != completion.status {
+            let _ = self.app.emit("ndm://completion", completion.status.clone());
+            if old.deadline.is_none() && completion.status.deadline.is_some() {
+                crate::show_main(&self.app);
+                let _ = self
+                    .app
+                    .notification()
+                    .builder()
+                    .title("下载任务已全部完成")
+                    .body("将在 60 秒后执行电源操作，可在 NDM 中取消")
+                    .show();
+            }
+        }
+        drop(completion);
+        if let Some(action) = action {
+            let me = self.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let result = (|| {
+                    let _persist = me.persist_lock.lock();
+                    let active = me.active.lock();
+                    let tasks = me.tasks.lock();
+                    if !active.is_empty()
+                        || tasks.is_empty()
+                        || tasks.iter().any(|t| t.status != Status::Completed)
+                        || me.updating.load(Ordering::Acquire)
+                    {
+                        return Err("任务状态已变化，电源操作已取消".to_string());
+                    }
+                    me.storage
+                        .save_tasks(&tasks)
+                        .map_err(|e| format!("保存下载进度失败，电源操作已取消：{e}"))?;
+                    drop(tasks);
+                    drop(active);
+                    drop(_persist);
+                    crate::power::execute(action)
+                })();
+                if let Err(error) = result {
+                    let mut completion = me.completion.lock();
+                    completion.status.error = Some(error);
+                    let _ = me.app.emit("ndm://completion", completion.status.clone());
+                }
+            });
+        }
+    }
+
+    fn schedule_tick(self: &Arc<Self>) {
+        let settings = self.settings();
+        let allowed = settings
+            .download_window
+            .allows(crate::schedule::local_minute());
+        let active = self.active.lock();
+        let tasks = self.tasks.lock();
+        let needed = if allowed {
+            active.len() < settings.max_concurrent as usize
+                && tasks.iter().any(|t| {
+                    t.status == Status::Waiting
+                        && t.scheduled_at.is_none_or(|at| at <= now_ms())
+                        && !active.contains_key(&t.id)
+                })
+        } else {
+            tasks.iter().any(|t| t.status == Status::Active)
+        };
+        drop(tasks);
+        drop(active);
+        if needed {
+            self.schedule();
+            self.persist();
+        }
+    }
+
+    pub fn set_task_schedule(self: &Arc<Self>, id: &str, at: Option<u64>) -> Result<(), String> {
+        crate::schedule::validate_time(at)?;
+        let persist = self.persist_lock.lock();
+        let active = self.active.lock();
+        let mut tasks = self.tasks.lock();
+        let index = tasks.iter().position(|t| t.id == id).ok_or("任务不存在")?;
+        if active.contains_key(id)
+            || !matches!(
+                tasks[index].status,
+                Status::Paused | Status::Error | Status::Waiting
+            )
+        {
+            return Err("请先暂停未完成的任务，等待连接退出后设置计划".into());
+        }
+        let mut next = tasks.clone();
+        next[index].scheduled_at = at;
+        if at.is_some() {
+            next[index].status = Status::Waiting;
+            next[index].error = None;
+        }
+        self.storage
+            .save_tasks(&next)
+            .map_err(|e| format!("计划保存失败：{e}"))?;
+        *tasks = next;
+        drop(tasks);
+        drop(active);
+        drop(persist);
+        self.completion.lock().interrupt();
+        self.schedule();
+        Ok(())
+    }
+
     pub fn set_browser_user_agent(&self, value: String) -> Result<(), String> {
         let _guard = self.persist_lock.lock();
         crate::user_agent::set_browser(value)?;
@@ -182,6 +336,7 @@ impl Manager {
     }
 
     pub async fn prepare_update(self: &Arc<Self>) -> Result<(), String> {
+        self.arm_completion(None)?;
         self.updating.store(true, Ordering::Release);
         let ids: Vec<_> = {
             let mut tasks = self.tasks.lock();
@@ -305,6 +460,8 @@ impl Manager {
         bundle.settings.max_concurrent = bundle.settings.max_concurrent.clamp(1, 16);
         bundle.settings.connections = bundle.settings.connections.clamp(1, 32);
         bundle.settings.bt.validate()?;
+        bundle.settings.task_view.validate()?;
+        bundle.settings.download_window.validate()?;
         let client = build_client(&bundle.settings)?;
         let mut tasks = self.tasks.lock();
         for task in &mut bundle.tasks {
@@ -341,6 +498,7 @@ impl Manager {
         drop(tasks);
         drop(active);
         drop(_persist);
+        self.arm_completion(None)?;
         self.emit_tasks();
         Ok(backup.to_string_lossy().into_owned())
     }
@@ -361,6 +519,43 @@ impl Manager {
 
     pub fn task(&self, id: &str) -> Option<Task> {
         self.tasks.lock().iter().find(|t| t.id == id).cloned()
+    }
+
+    pub async fn refresh_link(&self, id: &str, url: &str, restart: bool) -> Result<(), String> {
+        let original = self.task(id).ok_or("任务不存在")?;
+        if original.hls
+            || original.torrent.is_some()
+            || !matches!(original.status, Status::Paused | Status::Error)
+        {
+            return Err("仅可更新已暂停或失败的普通下载链接".into());
+        }
+        let replacement = engine::refresh_link(&self.client(), &original, url, restart).await?;
+        let persist = self.persist_lock.lock();
+        let active = self.active.lock();
+        let mut tasks = self.tasks.lock();
+        let index = tasks.iter().position(|t| t.id == id).ok_or("任务已移除")?;
+        if active.contains_key(id)
+            || serde_json::to_value(&tasks[index]).ok() != serde_json::to_value(&original).ok()
+        {
+            return Err("验证期间任务状态已变化，请暂停后重试".into());
+        }
+        if !restart && original.downloaded > 0 {
+            let part = Path::new(&original.save_dir).join(format!("{}.part", original.file_name));
+            if std::fs::metadata(part).ok().map(|m| m.len()) != original.total {
+                return Err("本地分段文件缺失或大小变化，无法沿用进度；可选择从头下载".into());
+            }
+        }
+        let mut next = tasks.clone();
+        next[index] = replacement;
+        self.storage
+            .save_tasks(&next)
+            .map_err(|_| "更新链接保存失败，原任务未修改")?;
+        *tasks = next;
+        drop(tasks);
+        drop(active);
+        drop(persist);
+        self.emit_tasks();
+        Ok(())
     }
 
     pub fn update_task(&self, id: &str, f: impl FnOnce(&mut Task)) {
@@ -422,6 +617,8 @@ impl Manager {
         s.max_concurrent = s.max_concurrent.clamp(1, 16);
         s.connections = s.connections.clamp(1, 32);
         s.bt.validate()?;
+        s.task_view.validate()?;
+        s.download_window.validate()?;
         s.proxy_url = s.proxy_url.trim().to_string();
         let net_changed = {
             let cur = self.settings.read();
@@ -475,7 +672,12 @@ impl Manager {
         if self.updating.load(Ordering::Acquire) {
             return;
         }
-        let max = self.settings.read().max_concurrent as usize;
+        let settings = self.settings();
+        let max = settings.max_concurrent as usize;
+        let allowed = settings
+            .download_window
+            .allows(crate::schedule::local_minute());
+        let now = now_ms();
         let mut started = Vec::new();
         {
             let mut active = self.active.lock();
@@ -483,12 +685,26 @@ impl Manager {
                 return;
             }
             let mut tasks = self.tasks.lock();
+            if !allowed {
+                for task in tasks.iter_mut().filter(|t| t.status == Status::Active) {
+                    task.status = Status::Waiting;
+                    task.speed = 0;
+                    if let Some(rt) = active.get(&task.id) {
+                        rt.cancel.cancel();
+                    }
+                }
+            }
             for t in tasks.iter_mut() {
                 if active.len() >= max {
                     break;
                 }
-                if t.status == Status::Waiting && !active.contains_key(&t.id) {
+                if allowed
+                    && t.status == Status::Waiting
+                    && !active.contains_key(&t.id)
+                    && t.scheduled_at.is_none_or(|at| at <= now)
+                {
                     t.status = Status::Active;
+                    t.scheduled_at = None;
                     t.error = None;
                     let rt = Arc::new(ActiveRt::new());
                     active.insert(t.id.clone(), rt.clone());
@@ -536,6 +752,11 @@ impl Manager {
                             t.status = Status::Paused;
                         }
                     }
+                    Err(DlError::Restart) => {
+                        if t.status == Status::Active {
+                            t.status = Status::Waiting;
+                        }
+                    }
                     Err(e) => {
                         crate::diagnostics::record("download_failed");
                         t.status = Status::Error;
@@ -545,6 +766,7 @@ impl Manager {
             }
         }
         if let Some(name) = done_name {
+            self.completion.lock().completed();
             if self.settings.read().notify {
                 let _ = self
                     .app
@@ -568,6 +790,8 @@ impl Manager {
         loop {
             tokio::time::sleep(Duration::from_millis(500)).await;
             tick += 1;
+            self.schedule_tick();
+            self.completion_tick();
             let actives: Vec<(String, Arc<ActiveRt>)> = self
                 .active
                 .lock()
@@ -641,6 +865,7 @@ impl Manager {
         urls: Vec<String>,
         opts: AddOptions,
     ) -> Result<Vec<Task>, String> {
+        crate::schedule::validate_time(opts.scheduled_at)?;
         let settings = self.settings();
         // 先与文件名配对再过滤无效链接，避免名字错位
         let single_name = if urls.len() == 1 {
@@ -770,6 +995,7 @@ impl Manager {
                 } else {
                     Status::Paused
                 },
+                scheduled_at: opts.scheduled_at,
                 resumable: magnet.is_some(),
                 force_single: false,
                 segments: Vec::new(),
@@ -784,6 +1010,7 @@ impl Manager {
                 finished_at: None,
                 error: None,
                 mime: None,
+                http_identity: Default::default(),
                 headers: if magnet.is_some() {
                     vec![]
                 } else {
@@ -801,6 +1028,7 @@ impl Manager {
             tasks.insert(0, t.clone());
         }
         drop(tasks);
+        self.completion.lock().interrupt();
         self.persist();
         self.schedule();
         for task in &mut created {
@@ -932,11 +1160,13 @@ impl Manager {
                     t.name_locked = false;
                 }
                 t.segments.clear();
+                t.http_identity = Default::default();
                 t.downloaded = 0;
                 t.total = None;
                 t.resumable = false;
                 t.force_single = false;
                 t.finished_at = None;
+                t.scheduled_at = None;
                 t.error = None;
                 t.status = Status::Waiting;
             }

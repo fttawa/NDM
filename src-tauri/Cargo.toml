@@ -1,6 +1,6 @@
 [package]
 name = "ndm"
-version = "0.3.1"
+version = "0.3.2"
 description = "NDM - 多线程下载管理器"
 edition = "2021"
 
@@ -34,6 +34,9 @@ m3u8-rs = "6"
 base64 = "0.22"
 tauri-plugin-updater = { version = "~2.14", default-features = false, features = ["native-tls", "system-proxy"] }
 updater-http = { package = "reqwest", version = "0.13", default-features = false, features = ["socks"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_System_Power", "Win32_System_SystemInformation", "Win32_System_Shutdown"] }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }

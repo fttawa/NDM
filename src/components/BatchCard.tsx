@@ -4,6 +4,7 @@ import { api, pickDirectory, type BatchPayload } from "../lib/api";
 import { bytes } from "../lib/format";
 import { FileIcon } from "./TaskCard";
 import { Switch } from "./ui";
+import { CaptureControls } from "./CaptureControls";
 
 /** Windows 目录名非法字符替换为 _，并去掉结尾的点和空格 */
 function safeSegment(s: string) {
@@ -124,6 +125,7 @@ export function BatchCard({ id }: { id: string }) {
             </span>
           </div>
         </div>
+        <CaptureControls />
         <button className="icon-btn ghost" onClick={close} aria-label="取消">
           <X size={17} />
         </button>

@@ -12,6 +12,64 @@ pub struct BtSettings {
     pub upload_limit: u32,
     pub bootstrap_nodes: Vec<String>,
     pub trackers: Vec<String>,
+    pub proxy: BtProxy,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BtProxy {
+    pub enabled: bool,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub password: String,
+}
+
+impl Default for BtProxy {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            host: "127.0.0.1".into(),
+            port: 1080,
+            username: String::new(),
+            password: String::new(),
+        }
+    }
+}
+
+impl BtProxy {
+    fn validate(&mut self) -> Result<(), String> {
+        self.host = self.host.trim().to_string();
+        if !self.enabled {
+            return Ok(());
+        }
+        let host = if self.host.contains(':') && !self.host.starts_with('[') {
+            format!("[{}]", self.host)
+        } else {
+            self.host.clone()
+        };
+        let url = reqwest::Url::parse(&format!("socks5://{host}:{}", self.port))
+            .map_err(|_| "BT 代理主机或端口无效")?;
+        if self.host.is_empty()
+            || self.port == 0
+            || self.host.contains(['/', '\\', '?', '#', '@'])
+            || self.host.chars().any(char::is_whitespace)
+            || url.host_str().is_none()
+            || url.path() != "" && url.path() != "/"
+        {
+            return Err("BT 代理请填写主机名 / IP 与 1–65535 端口".into());
+        }
+        self.host = url.host_str().unwrap().trim_matches(['[', ']']).to_string();
+        if self.username.len() > 255
+            || self.password.len() > 255
+            || self.username.contains('\0')
+            || self.password.contains('\0')
+            || (self.username.is_empty() && !self.password.is_empty())
+        {
+            return Err("SOCKS5 用户名和密码最多 255 字节；填写密码时也须填写用户名".into());
+        }
+        Ok(())
+    }
 }
 
 impl Default for BtSettings {
@@ -33,12 +91,14 @@ impl Default for BtSettings {
                 "udp://open.stealth.si:80/announce".into(),
                 "udp://tracker.torrent.eu.org:451/announce".into(),
             ],
+            proxy: Default::default(),
         }
     }
 }
 
 impl BtSettings {
     pub fn validate(&mut self) -> Result<(), String> {
+        self.proxy.validate()?;
         if !(10..=500).contains(&self.max_peers) {
             return Err("BT 每任务 Peer 上限须为 10–500".into());
         }
@@ -124,6 +184,7 @@ pub struct Runtime {
     pub upload_limit: u32,
     pub file_progress: Vec<u64>,
     pub trackers: Vec<Tracker>,
+    pub proxy: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -137,6 +198,60 @@ pub struct Tracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn socks5_proxy_validates_host_port_and_authentication() {
+        for (host, normalized) in [
+            ("  localhost ", "localhost"),
+            ("127.0.0.1", "127.0.0.1"),
+            ("::1", "::1"),
+            ("[::1]", "::1"),
+            ("proxy.example.com", "proxy.example.com"),
+        ] {
+            let mut proxy = BtProxy {
+                enabled: true,
+                host: host.into(),
+                ..Default::default()
+            };
+            proxy.validate().unwrap();
+            assert_eq!(proxy.host, normalized);
+        }
+        for host in [
+            "",
+            "http://localhost",
+            "localhost/path",
+            "user@host",
+            "a b",
+            "a?b",
+            "a#b",
+            "localhost:1080",
+            "[::1",
+            "a\\b",
+        ] {
+            let mut proxy = BtProxy {
+                enabled: true,
+                host: host.into(),
+                ..Default::default()
+            };
+            assert!(proxy.validate().is_err(), "{host}");
+        }
+        let mut proxy = BtProxy {
+            enabled: true,
+            port: 0,
+            ..Default::default()
+        };
+        assert!(proxy.validate().is_err());
+        proxy.port = 1080;
+        proxy.password = "secret".into();
+        assert!(proxy.validate().is_err());
+        proxy.username = "user".into();
+        proxy.validate().unwrap();
+        proxy.password = "密".repeat(86);
+        assert!(proxy.validate().is_err());
+        proxy.password = "bad\0password".into();
+        assert!(proxy.validate().is_err());
+        proxy.enabled = false;
+        proxy.validate().unwrap();
+    }
     #[test]
     fn old_settings_receive_defaults_and_lists_are_validated() {
         let old: crate::model::Settings = serde_json::from_str(r#"{"connections":8}"#).unwrap();

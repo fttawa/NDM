@@ -208,12 +208,15 @@ impl Storage {
         let data = std::fs::read(path)?;
         let mut bundle: ExportBundle = serde_json::from_slice(&data)?;
         bundle.settings.bt.validate()?;
+        bundle.settings.task_view.validate()?;
+        bundle.settings.download_window.validate()?;
         if !(1..=SCHEMA_VERSION).contains(&bundle.version) {
             return Err(format!("备份版本过高：{}", bundle.version).into());
         }
         let mut ids = std::collections::HashSet::new();
         let mut bt_hashes = std::collections::HashSet::new();
         for task in &bundle.tasks {
+            crate::schedule::validate_time(task.scheduled_at)?;
             if task.id.is_empty()
                 || !ids.insert(&task.id)
                 || task.file_name != crate::util::sanitize(&task.file_name)

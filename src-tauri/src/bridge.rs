@@ -346,7 +346,7 @@ fn accept(mgr: &Arc<Manager>, cap: Capture) -> Result<(), String> {
     let file_name = nonempty(cap.filename);
 
     if mgr.settings().capture_confirm {
-        // 弹出确认小卡片（独立置顶窗口，不打扰主窗口），由用户确认文件名与保存位置
+        // 弹出独立确认小卡片，由用户确认文件名与保存位置。
         let payload = CapturePayload {
             url: parsed.to_string(),
             file_name,
@@ -368,6 +368,7 @@ fn accept(mgr: &Arc<Manager>, cap: Capture) -> Result<(), String> {
                 headers,
                 hls: cap.hls,
                 torrent: None,
+                scheduled_at: None,
             },
         )?;
     }

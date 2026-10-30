@@ -1698,3 +1698,38 @@ button {
   color: var(--text);
   text-decoration: underline;
 }
+
+.capture-controls { display: flex; flex: none; gap: 0; }
+.capture-controls .icon-btn { width: 25px; height: 28px; }
+.capture-controls [aria-pressed="true"] { color: var(--text); background: var(--glass-hover); }
+.view-options .download-menu { width: 260px; gap: 12px; }
+.view-options .field { margin: 0; }
+.view-options .set-row { min-width: 0; gap: 10px; }
+.task-groups { display: flex; flex-direction: column; gap: 22px; }
+.task-group-title { display: flex; align-items: center; gap: 12px; font-size: 14px; margin: 0 0 12px; }
+.task-list { display: flex; flex-direction: column; gap: 6px; }
+.task-card.compact { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(140px, .7fr) minmax(160px, auto); align-items: center; gap: 14px; padding: 11px 14px; border-radius: 12px; }
+.compact .task-head { min-width: 0; }
+.compact .task-list-details { display: flex; flex-direction: column; gap: 5px; min-width: 0; color: var(--text-2); font-size: 11px; }
+.compact .task-foot { justify-content: flex-end; min-width: 0; }
+.compact .task-foot .meta { display: none; }
+.compact .actions { opacity: 1; }
+.compact > .segbar { position: absolute; height: 2px; left: 14px; right: 14px; bottom: 0; }
+.compact .file-icon { width: 34px !important; height: 34px !important; border-radius: 9px; }
+.schedule-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.schedule-grid .set-title { display: flex; align-items: center; gap: 8px; }
+.schedule-grid .field { margin: 0; }
+.schedule-tasks { margin-top: 18px; }
+.schedule-task { display: flex; gap: 16px; align-items: center; width: 100%; padding: 14px 0; background: none; border: 0; border-top: 1px solid var(--line); text-align: left; cursor: pointer; }
+.schedule-task > :first-child { flex: 1; }
+.task-schedule { display: flex; flex-direction: column; gap: 12px; padding: 16px 0; }
+.task-schedule .field { margin: 0; }
+.completion-notice { position: fixed; z-index: 95; left: 50%; bottom: 22px; transform: translateX(-50%); width: min(520px, calc(100vw - 40px)); display: flex; align-items: center; gap: 14px; padding: 18px; border-radius: 16px; background: var(--tint-solid); }
+.completion-notice > div { flex: 1; min-width: 0; }
+.completion-notice p { margin: 5px 0 0; overflow-wrap: anywhere; }
+@media (max-width: 1050px) {
+  .task-card.compact { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+  .compact .task-list-details { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; }
+  .compact .task-foot { grid-row: 1; grid-column: 2; }
+  .schedule-grid { grid-template-columns: minmax(0, 1fr); }
+}

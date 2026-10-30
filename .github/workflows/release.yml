@@ -11,6 +11,7 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,8 +30,34 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify release versions
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/verify-release.mjs
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          shared-key: release
+
       - name: Native build tools
         run: choco install nasm strawberryperl ninja --no-progress -y
+
+      - name: Cache native dependencies
+        uses: actions/cache@v4
+        with:
+          key: native-deps-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageVersion }}-${{ hashFiles('scripts/build-bt-helper.ps1') }}
+          path: |
+            .native-build/*.tar.gz
+            .native-build/boost_1_88_0
+            .native-build/openssl-3.5.9
+            .native-build/openssl-install
+            .native-build/libtorrent
+            .native-build/json
 
       - name: Prepare release notes
         id: notes
@@ -48,7 +75,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: .
-          tauriScript: pnpm tauri
+          tauriScript: node node_modules/@tauri-apps/cli/tauri.js
           tagName: ${{ github.ref_name }}
           releaseName: "NDM ${{ github.ref_name }}"
           releaseBody: ${{ steps.notes.outputs.body }}
@@ -57,6 +84,7 @@ jobs:
           uploadUpdaterJson: true
           uploadUpdaterSignatures: true
           updaterJsonPreferNsis: true
+          args: -- --locked
 
       - name: Publish signed release
         env:

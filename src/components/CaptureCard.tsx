@@ -4,6 +4,7 @@ import { animateWindowHeight, api, pickDirectory, type CapturePayload, type Task
 import { bytes } from "../lib/format";
 import { CaptureProgress } from "./CaptureProgress";
 import { FileIcon } from "./TaskCard";
+import { CaptureControls } from "./CaptureControls";
 
 /** 展开为进度窗口后的高度 */
 const PROGRESS_H = 318;
@@ -25,7 +26,7 @@ function hostOf(url: string | null | undefined) {
   }
 }
 
-/** 下载确认小卡片：浏览器扩展转交下载时弹出的独立置顶窗口 */
+/** 下载确认小卡片：浏览器扩展转交下载时弹出的独立窗口 */
 export function CaptureCard({ id }: { id: string }) {
   const [cap, setCap] = useState<CapturePayload | null>(null);
   const [name, setName] = useState("");
@@ -130,6 +131,7 @@ export function CaptureCard({ id }: { id: string }) {
             <span>{hostOf(cap.referrer) || hostOf(cap.url)}</span>
           </div>
         </div>
+        <CaptureControls />
         <button className="icon-btn ghost" onClick={close} aria-label="取消">
           <X size={17} />
         </button>

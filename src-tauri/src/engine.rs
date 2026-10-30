@@ -1,11 +1,14 @@
 //! 下载引擎：探测、多连接分段下载、动态分段、单流回退
 
 use crate::manager::Manager;
-use crate::model::Segment;
+use crate::model::{HttpIdentity, Segment};
 use crate::util;
 use futures_util::StreamExt;
 use parking_lot::Mutex;
-use reqwest::header::{ACCEPT_RANGES, CONTENT_DISPOSITION, CONTENT_RANGE, CONTENT_TYPE, RANGE};
+use reqwest::header::{
+    ACCEPT_ENCODING, ACCEPT_RANGES, CONTENT_DISPOSITION, CONTENT_RANGE, CONTENT_TYPE, ETAG,
+    IF_RANGE, LAST_MODIFIED, RANGE,
+};
 use reqwest::StatusCode;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -48,6 +51,7 @@ pub enum DlError {
     Cancelled,
     /// 服务器不支持 Range 请求
     NoRange,
+    Restart,
     Other(String),
 }
 
@@ -56,6 +60,7 @@ impl std::fmt::Display for DlError {
         match self {
             DlError::Cancelled => write!(f, "已取消"),
             DlError::NoRange => write!(f, "服务器不支持分段下载"),
+            DlError::Restart => write!(f, "正在应用 BT 代理并重新连接"),
             DlError::Other(s) => write!(f, "{s}"),
         }
     }
@@ -344,6 +349,8 @@ impl Drop for StreamGuard<'_> {
 struct Source {
     url: String,
     headers: Arc<Vec<(String, String)>>,
+    identity: HttpIdentity,
+    total: Option<u64>,
 }
 
 impl Source {
@@ -351,12 +358,25 @@ impl Source {
         Self {
             url: task.url.clone(),
             headers: Arc::new(task.headers.clone()),
+            identity: task.http_identity.clone(),
+            total: task.total,
         }
     }
 
     fn get(&self, client: &reqwest::Client) -> reqwest::RequestBuilder {
         let mut req = client.get(&self.url);
         for (k, v) in self.headers.iter() {
+            if [
+                "range",
+                "if-range",
+                "accept-encoding",
+                "host",
+                "content-length",
+            ]
+            .contains(&k.to_ascii_lowercase().as_str())
+            {
+                continue;
+            }
             // 非法的头名称/值直接跳过，不影响下载
             if let (Ok(name), Ok(value)) = (
                 reqwest::header::HeaderName::from_bytes(k.as_bytes()),
@@ -365,7 +385,7 @@ impl Source {
                 req = req.header(name, value);
             }
         }
-        req
+        req.header(ACCEPT_ENCODING, "identity")
     }
 }
 
@@ -374,6 +394,7 @@ struct ProbeInfo {
     resumable: bool,
     file_name: Option<String>,
     mime: Option<String>,
+    identity: HttpIdentity,
 }
 
 fn parse_content_range(value: &str) -> Option<(u64, u64, Option<u64>)> {
@@ -442,6 +463,10 @@ async fn probe(
         resumable,
         file_name,
         mime,
+        identity: HttpIdentity {
+            etag: header_str(ETAG),
+            last_modified: header_str(LAST_MODIFIED),
+        },
     })
 }
 
@@ -463,6 +488,70 @@ fn plan_segments(total: u64, conns: u32) -> Vec<Segment> {
             }
         })
         .collect()
+}
+
+pub async fn refresh_link(
+    client: &reqwest::Client,
+    original: &crate::model::Task,
+    url: &str,
+    restart: bool,
+) -> Result<crate::model::Task, String> {
+    let target = reqwest::Url::parse(url.trim()).map_err(|_| "请输入有效的 HTTP(S) 下载链接")?;
+    if !matches!(target.scheme(), "http" | "https")
+        || target.host_str().is_none()
+        || !target.username().is_empty()
+        || target.password().is_some()
+        || url.len() > 16384
+    {
+        return Err("请输入不含用户名密码的 HTTP(S) 下载链接".into());
+    }
+    let mut task = original.clone();
+    task.url = target.to_string();
+    if reqwest::Url::parse(&original.url)
+        .ok()
+        .is_none_or(|old| old.origin() != target.origin())
+    {
+        // Browser credentials are scoped to the old origin. Do not forward
+        // cookies, authorization or referrers to a newly pasted host.
+        task.headers.retain(|(name, _)| {
+            ["user-agent", "accept", "accept-language"]
+                .contains(&name.to_ascii_lowercase().as_str())
+        });
+    }
+    let info = tokio::time::timeout(
+        Duration::from_secs(20),
+        probe(client, &Source::from_task(&task), &ActiveRt::new()),
+    )
+    .await
+    .map_err(|_| "新链接验证超时，原任务未修改".to_string())?
+    .map_err(|e| format!("新链接验证失败：{e}"))?;
+    if !restart && original.downloaded > 0 {
+        if !original.resumable || original.segments.is_empty() || !info.resumable {
+            return Err("新旧任务不支持分段续传；可勾选从头下载，原任务尚未修改".into());
+        }
+        if original.total.is_none() || info.total != original.total {
+            return Err("新链接文件大小不同，无法沿用已有分段；原任务尚未修改".into());
+        }
+        if !original.http_identity.matches(&info.identity) {
+            return Err("ETag / 修改时间不匹配或旧任务缺少文件标识，无法确认同一文件；可勾选从头下载，原任务尚未修改".into());
+        }
+    }
+    if restart || original.downloaded == 0 {
+        task.segments.clear();
+        task.downloaded = 0;
+        task.resumable = false;
+        task.force_single = false;
+    }
+    task.total = info.total;
+    task.mime = info.mime;
+    task.http_identity = info.identity;
+    task.status = crate::model::Status::Paused;
+    task.error = None;
+    task.finished_at = None;
+    task.speed = 0;
+    task.active_conns = 0;
+    task.boost = 0;
+    Ok(task)
 }
 
 /// 下载入口：分段模式失败于 NoRange 时自动降级为单连接
@@ -493,6 +582,7 @@ pub async fn run(mgr: Arc<Manager>, id: String, rt: Arc<ActiveRt>) -> Result<(),
 async fn run_once(mgr: &Arc<Manager>, id: &str, rt: &Arc<ActiveRt>) -> Result<(), DlError> {
     let client = mgr.client();
     let mut task = mgr.task(id).ok_or(DlError::Cancelled)?;
+    rt.single.store(task.downloaded, Ordering::Release);
     let dir = PathBuf::from(&task.save_dir);
     std::fs::create_dir_all(&dir)?;
 
@@ -500,6 +590,14 @@ async fn run_once(mgr: &Arc<Manager>, id: &str, rt: &Arc<ActiveRt>) -> Result<()
     let mut probed = None;
     if task.resumable && !task.segments.is_empty() {
         let info = probe(&client, &Source::from_task(&task), rt).await?;
+        if task.downloaded > 0
+            && task.http_identity.validator().is_some()
+            && (info.total != task.total || !task.http_identity.matches(&info.identity))
+        {
+            return Err(DlError::Other(
+                "服务器文件已变化，已保留原有进度；请更新链接或重新下载".into(),
+            ));
+        }
         if info.resumable && info.total == task.total {
             probed = Some(info);
         } else {
@@ -532,6 +630,7 @@ async fn run_once(mgr: &Arc<Manager>, id: &str, rt: &Arc<ActiveRt>) -> Result<()
         }
         task.total = info.total;
         task.mime = info.mime;
+        task.http_identity = info.identity;
         task.resumable = info.resumable && !task.force_single;
         task.segments = match (task.resumable, task.total) {
             (true, Some(total)) if total > 0 => plan_segments(total, task.connections),
@@ -544,6 +643,7 @@ async fn run_once(mgr: &Arc<Manager>, id: &str, rt: &Arc<ActiveRt>) -> Result<()
             t.name_locked = true;
             t.total = snapshot.total;
             t.mime = snapshot.mime;
+            t.http_identity = snapshot.http_identity;
             t.resumable = snapshot.resumable;
             t.segments = snapshot.segments;
             t.downloaded = 0;
@@ -729,7 +829,7 @@ async fn worker(
         loop {
             let res = {
                 let _guard = ConnGuard::new(&rt.conns);
-                fetch_segment(&mgr, &client, &src, &file, &rt, &seg, &cancel).await
+                fetch_segment(&mgr.limiter, &client, &src, &file, &rt, &seg, &cancel).await
             };
             match res {
                 Ok(()) => break,
@@ -754,7 +854,7 @@ async fn worker(
 }
 
 async fn fetch_segment(
-    mgr: &Arc<Manager>,
+    limiter: &crate::limiter::Limiter,
     client: &reqwest::Client,
     src: &Source,
     file: &File,
@@ -768,10 +868,11 @@ async fn fetch_segment(
         return Ok(());
     }
     let t0 = Instant::now();
-    let req = src
-        .get(client)
-        .header(RANGE, format!("bytes={pos}-{end}"))
-        .send();
+    let mut req = src.get(client).header(RANGE, format!("bytes={pos}-{end}"));
+    if let Some(validator) = src.identity.validator() {
+        req = req.header(IF_RANGE, validator);
+    }
+    let req = req.send();
     let resp = tokio::select! {
         r = req => r?,
         _ = cancel.cancelled() => return Err(DlError::Cancelled),
@@ -779,9 +880,11 @@ async fn fetch_segment(
     rt.record_latency(t0.elapsed());
     let status = resp.status();
     if status == StatusCode::OK {
-        if pos != 0 {
-            return Err(DlError::NoRange);
-        }
+        return Err(if src.identity.validator().is_some() {
+            DlError::Other("文件标识或分段能力已变化，已停止续传".into())
+        } else {
+            DlError::NoRange
+        });
     } else if status != StatusCode::PARTIAL_CONTENT {
         return Err(DlError::Other(format!(
             "服务器返回 HTTP {}",
@@ -794,10 +897,16 @@ async fn fetch_segment(
             .and_then(|v| v.to_str().ok())
             .and_then(parse_content_range)
             .ok_or_else(|| DlError::Other("服务器返回无效的 Content-Range".into()))?;
-        if range.0 != pos || range.1 > end {
+        if range.0 != pos || range.1 > end || range.2 != src.total {
             return Err(DlError::Other(
                 "服务器返回的 Content-Range 与请求不匹配".into(),
             ));
+        }
+    }
+
+    if let Some(etag) = resp.headers().get(ETAG).and_then(|v| v.to_str().ok()) {
+        if src.identity.etag.as_deref().is_some_and(|old| old != etag) {
+            return Err(DlError::Other("服务器文件 ETag 已变化，已停止续传".into()));
         }
     }
 
@@ -813,7 +922,7 @@ async fn fetch_segment(
         };
         let Some(chunk) = next else { break };
         let chunk = chunk?;
-        let wait = mgr.limiter.reserve(chunk.len());
+        let wait = limiter.reserve(chunk.len());
         if !wait.is_zero() {
             tokio::select! {
                 _ = tokio::time::sleep(wait) => {}
@@ -914,6 +1023,188 @@ async fn single(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn partial_task(url: &str) -> crate::model::Task {
+        serde_json::from_value(serde_json::json!({
+            "id":"refresh-test", "url":url, "fileName":"kept.bin", "nameLocked":true,
+            "saveDir":"unused", "total":16, "downloaded":8, "status":"error", "resumable":true,
+            "connections":1, "createdAt":123, "finishedAt":null, "error":"HTTP 403", "mime":null,
+            "segments":[{"start":0,"end":15,"pos":8}],
+            "httpIdentity":{"etag":"\"content-v1\""},
+            "headers":[["Cookie","old-secret"],["Authorization","Bearer old-secret"],["User-Agent","NDM-Test"],["Range","bytes=3-4"]]
+        })).unwrap()
+    }
+
+    fn test_response(request: tiny_http::Request, total: u64, etag: Option<&str>, range: bool) {
+        let mut response = tiny_http::Response::from_data(vec![0; total as usize]);
+        if range {
+            response = response.with_status_code(206).with_header(
+                tiny_http::Header::from_bytes(
+                    "Content-Range",
+                    format!("bytes 0-{}/{total}", total - 1),
+                )
+                .unwrap(),
+            );
+        }
+        if let Some(etag) = etag {
+            response = response.with_header(tiny_http::Header::from_bytes("ETag", etag).unwrap());
+        }
+        request.respond(response).unwrap();
+    }
+
+    #[tokio::test]
+    async fn refreshed_links_preserve_segments_only_for_the_same_resource() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", server.server_addr());
+        let original = partial_task(&format!("{base}/expired"));
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let worker = std::thread::spawn(move || {
+            for _ in 0..6 {
+                let req = server
+                    .recv_timeout(Duration::from_secs(10))
+                    .unwrap()
+                    .unwrap();
+                assert!(req.headers().iter().any(|h| h.field.equiv("Cookie")));
+                match req.url() {
+                    "/ok" => test_response(req, 16, Some("\"content-v1\""), true),
+                    "/changed" => test_response(req, 16, Some("\"content-v2\""), true),
+                    "/size" => test_response(req, 17, Some("\"content-v1\""), true),
+                    "/no-range" => test_response(req, 16, Some("\"content-v1\""), false),
+                    "/forbidden" => req.respond(tiny_http::Response::empty(403)).unwrap(),
+                    _ => panic!("unexpected URL"),
+                }
+            }
+        });
+        let next = refresh_link(&client, &original, &format!("{base}/ok"), false)
+            .await
+            .unwrap();
+        assert_eq!(next.downloaded, 8);
+        assert_eq!(next.segments[0].pos, 8);
+        assert_eq!(next.file_name, original.file_name);
+        assert_eq!(next.save_dir, original.save_dir);
+        assert_eq!(next.status, crate::model::Status::Paused);
+        assert!(next.error.is_none());
+        for path in ["changed", "size", "no-range", "forbidden"] {
+            assert!(
+                refresh_link(&client, &original, &format!("{base}/{path}"), false)
+                    .await
+                    .is_err(),
+                "{path}"
+            );
+        }
+        let restarted = refresh_link(&client, &original, &format!("{base}/changed"), true)
+            .await
+            .unwrap();
+        assert_eq!(restarted.downloaded, 0);
+        assert!(restarted.segments.is_empty());
+        assert_eq!(original.downloaded, 8);
+        worker.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn refreshed_cross_origin_drops_credentials_and_requires_identity() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/fresh", server.server_addr());
+        let original = partial_task("https://old.invalid/expired");
+        let worker = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let req = server
+                    .recv_timeout(Duration::from_secs(10))
+                    .unwrap()
+                    .unwrap();
+                assert!(!req
+                    .headers()
+                    .iter()
+                    .any(|h| h.field.equiv("Cookie") || h.field.equiv("Authorization")));
+                assert!(req
+                    .headers()
+                    .iter()
+                    .any(|h| h.field.equiv("User-Agent") && h.value.as_str() == "NDM-Test"));
+                test_response(req, 16, Some("\"content-v1\""), true);
+            }
+        });
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let next = refresh_link(&client, &original, &url, false).await.unwrap();
+        assert_eq!(next.downloaded, 8);
+        let mut legacy = original;
+        legacy.http_identity = Default::default();
+        assert!(refresh_link(&client, &legacy, &url, false).await.is_err());
+        worker.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn resumed_range_checks_if_range_and_never_writes_changed_content() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", server.server_addr());
+        let worker = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let req = server
+                    .recv_timeout(Duration::from_secs(10))
+                    .unwrap()
+                    .unwrap();
+                assert!(req
+                    .headers()
+                    .iter()
+                    .any(|h| h.field.equiv("If-Range") && h.value.as_str() == "\"content-v1\""));
+                assert!(req
+                    .headers()
+                    .iter()
+                    .any(|h| h.field.equiv("Range") && h.value.as_str() == "bytes=8-15"));
+                if req.url() == "/changed" {
+                    test_response(req, 16, Some("\"changed\""), false);
+                } else {
+                    req.respond(
+                        tiny_http::Response::from_data(b"ijklmnop".to_vec())
+                            .with_status_code(206)
+                            .with_header(
+                                tiny_http::Header::from_bytes("Content-Range", "bytes 8-15/16")
+                                    .unwrap(),
+                            )
+                            .with_header(
+                                tiny_http::Header::from_bytes("ETag", "\"content-v1\"").unwrap(),
+                            ),
+                    )
+                    .unwrap();
+                }
+            }
+        });
+        let path = std::env::temp_dir().join(format!("ndm-refresh-{}.part", uuid::Uuid::new_v4()));
+        std::fs::write(&path, b"abcdefgh00000000").unwrap();
+        let file = OpenOptions::new().write(true).open(&path).unwrap();
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let rt = ActiveRt::new();
+        let cancel = CancellationToken::new();
+        let seg = SegRt::new(0, 15, 8, false);
+        let changed = Source::from_task(&partial_task(&format!("{base}/changed")));
+        assert!(fetch_segment(
+            &crate::limiter::Limiter::new(0),
+            &client,
+            &changed,
+            &file,
+            &rt,
+            &seg,
+            &cancel
+        )
+        .await
+        .is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"abcdefgh00000000");
+        let source = Source::from_task(&partial_task(&format!("{base}/ok")));
+        fetch_segment(
+            &crate::limiter::Limiter::new(0),
+            &client,
+            &source,
+            &file,
+            &rt,
+            &seg,
+            &cancel,
+        )
+        .await
+        .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"abcdefghijklmnop");
+        drop(file);
+        std::fs::remove_file(path).unwrap();
+        worker.join().unwrap();
+    }
 
     fn rt_with(segs: &[(u64, u64, u64, bool)]) -> ActiveRt {
         let rt = ActiveRt::new();

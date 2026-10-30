@@ -1,6 +1,6 @@
 //! 下载确认小卡片（类似 IDM 的“下载文件信息”对话框）
 //!
-//! 浏览器扩展转交下载时，单独弹出一个置顶的小窗口，不打扰主窗口。
+//! 浏览器扩展转交下载时，单独弹出小窗口，置顶由用户设置控制。
 //! 每个下载一个窗口，标签为 `capture-<id>`，前端按 id 取回下载信息。
 
 use crate::bridge::{BatchPayload, CapturePayload};
@@ -113,11 +113,11 @@ fn open_window(
     .inner_size(width, height)
     .resizable(false)
     .maximizable(false)
-    .minimizable(false)
+    .minimizable(true)
     .decorations(false)
     .transparent(true)
     .shadow(true)
-    .always_on_top(true)
+    .always_on_top(app.state::<Arc<Manager>>().settings().capture_on_top)
     .center()
     // 前端渲染完成后再显示，避免白屏闪烁
     .visible(false)
@@ -145,7 +145,7 @@ fn open_window(
     Ok(())
 }
 
-/// 显示并置前（Windows 会阻止后台程序抢焦点，置顶窗口可以保证可见）
+/// 显示并请求焦点，保留用户选择的置顶状态。
 pub fn show(window: &WebviewWindow) {
     let _ = window.show();
     let _ = window.set_focus();

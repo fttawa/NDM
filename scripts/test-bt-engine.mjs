@@ -8,6 +8,8 @@ import { createInterface } from 'node:readline';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createServer } from 'node:http';
+import { createSocket } from 'node:dgram';
+import { socks5Server } from './socks5-test-server.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const helperArg = process.argv.indexOf('--helper');
@@ -18,7 +20,7 @@ class Process {
   constructor(exe, args = []) {
     this.child = spawn(exe, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     this.pending = []; this.events = []; this.stderr = ''; this.exited = false;
-    this.child.stderr.on('data', b => { this.stderr += b; });
+    this.child.stderr.on('data', b => { this.stderr += b; if (process.env.NDM_BT_TEST_TRACE) console.log(b.toString()); });
     this.child.stdin.on('error', () => {});
     createInterface({ input: this.child.stdout }).on('line', line => {
       const event = JSON.parse(line);
@@ -134,6 +136,90 @@ async function until(p, predicate, authorize = true) {
   }
   throw Error('Transfer deadline exceeded');
 }
+
+test('SOCKS5 proxy relays authenticated Peer and Tracker connections with remote DNS', { timeout: 60000 }, async () => {
+  const proxy = await socks5Server({ username: 'ndm-user', password: 'ndm-password', resolve: host => host === 'tracker.ndm.test' ? '127.0.0.1' : host });
+  let peerPort = 0;
+  const tracker = createServer((req, res) => {
+    const peer = Buffer.from([127, 0, 0, 1, peerPort >> 8, peerPort & 255]);
+    res.end(Buffer.concat([Buffer.from('d8:intervali60e5:peers6:'), peer, Buffer.from('e')]));
+  });
+  await new Promise(resolve => tracker.listen(0, '127.0.0.1', resolve));
+  try {
+    await fixture('v2', async ({ temp, info, start }) => {
+      peerPort = Number(new URL(info.url).searchParams.get('x.pe').split(':').pop());
+      const bt = { dht: false, pex: false, lsd: true, upnp: true, bootstrapNodes: [], maxPeers: 80, uploadLimit: 0,
+        trackers: [`http://tracker.ndm.test:${tracker.address().port}/announce`],
+        proxy: { enabled: true, host: '127.0.0.1', port: proxy.port, username: 'ndm-user', password: 'ndm-password' } };
+      const p = start('', 128 * 1024, undefined, { localTest: false, bt });
+      let proxied = false;
+      await until(p, event => { if (event.details?.proxy) proxied = true; return event.type === 'complete'; });
+      assert.equal(await p.done, 0);
+      assert.ok(proxied, 'Runtime must identify proxied sessions');
+      assert.ok(proxy.requests.some(r => (r.command === 1 || r.command === 'udp') && r.port === peerPort), 'Peer payload must use SOCKS5 over TCP or uTP');
+      assert.ok(proxy.requests.some(r => r.command === 1 && r.host === 'tracker.ndm.test'), 'Tracker hostname must be resolved by the proxy');
+      for (const file of info.files) assert.deepEqual(readFileSync(path.join(temp, 'download', file)), readFileSync(path.join(temp, 'seed', file)));
+      for (const trackers of [bt.trackers, []]) {
+        const wrongAuth = start('', 0, path.join(temp, `wrong-auth-${trackers.length}`), { localTest: false, bt: { ...bt, trackers, proxy: { ...bt.proxy, password: 'wrong' } } });
+        let failure; const deadline = Date.now() + 10000;
+        do {
+          assert.ok(Date.now() < deadline, `Proxy authentication failure must be reported promptly (${trackers.length} Trackers)`);
+          failure = await wrongAuth.next();
+          assert.notEqual(failure.type, 'metadata', 'Proxy authentication failure must not fall back to direct metadata retrieval');
+        } while (failure.type === 'progress');
+        assert.equal(failure.type, 'error'); assert.match(failure.message, /SOCKS5 proxy.*authentication/i);
+        assert.equal(await wrongAuth.done, 1);
+      }
+    });
+  } finally { await proxy.close(); tracker.closeAllConnections(); await new Promise(resolve => tracker.close(resolve)); }
+});
+
+test('SOCKS5 without authentication relays UDP Tracker, DHT and a complete BTv1 download', { timeout: 60000 }, async () => {
+  const proxy = await socks5Server(), tracker = createSocket('udp4'), dht = createSocket('udp4');
+  let peerPort = 0;
+  const trackerSources = [], dhtSources = [];
+  tracker.on('message', (packet, from) => {
+    if (packet.length < 16) return;
+    trackerSources.push(from);
+    const action = packet.readUInt32BE(8), transaction = packet.readUInt32BE(12);
+    if (action === 0) {
+      const reply = Buffer.alloc(16); reply.writeUInt32BE(transaction, 4); reply.writeBigUInt64BE(123n, 8);
+      tracker.send(reply, from.port, from.address);
+    } else if (action === 1) {
+      const reply = Buffer.alloc(26); reply.writeUInt32BE(1, 0); reply.writeUInt32BE(transaction, 4); reply.writeUInt32BE(60, 8); reply.writeUInt32BE(1, 16);
+      reply.set([127, 0, 0, 1], 20); reply.writeUInt16BE(peerPort, 24);
+      tracker.send(reply, from.port, from.address);
+    }
+  });
+  dht.on('message', (_packet, from) => dhtSources.push(from));
+  await Promise.all([new Promise(r => tracker.bind(0, '127.0.0.1', r)), new Promise(r => dht.bind(0, '127.0.0.1', r))]);
+  try {
+    await fixture('v1', async ({ temp, info, start }) => {
+      peerPort = Number(new URL(info.url).searchParams.get('x.pe').split(':').pop());
+      const bt = {
+        dht: false, pex: false, bootstrapNodes: [`127.0.0.1:${dht.address().port}`],
+        trackers: [`udp://127.0.0.1:${tracker.address().port}/announce`],
+        proxy: { enabled: true, host: '127.0.0.1', port: proxy.port },
+      };
+      const p = start('', 128 * 1024, undefined, { localTest: false, bt });
+      // Bootstrap DHT once the SOCKS UDP association is established; initial
+      // bootstrap retries can otherwise occur after this small file completes.
+      await until(p, e => e.type === 'metadata', false);
+      p.send({ type: 'configure', bt: { ...bt, dht: true } });
+      p.send({ type: 'start' });
+      await until(p, e => e.type === 'complete'); assert.equal(await p.done, 0);
+      for (const file of info.files) assert.deepEqual(readFileSync(path.join(temp, 'download', file)), readFileSync(path.join(temp, 'seed', file)));
+      const relayed = port => proxy.requests.some(r => r.command === 'udp' && r.port === port);
+      assert.ok(relayed(tracker.address().port), 'UDP Tracker must use the proxy UDP association');
+      assert.ok(relayed(dht.address().port), 'DHT bootstrap packets must use the proxy UDP association');
+      assert.ok(trackerSources.length && dhtSources.length);
+      assert.ok(trackerSources.every(t => dhtSources.some(d => t.address === d.address && t.port === d.port)), 'Tracker and DHT must receive the same proxy relay source');
+    });
+  } finally {
+    await proxy.close();
+    await Promise.all([new Promise(r => tracker.close(r)), new Promise(r => dht.close(r))]);
+  }
+});
 
 for (const mode of ['v1', 'v2', 'hybrid']) {
   test(`${mode}: real magnet metadata, rate limit, pause, fresh process resume and corrupt piece repair`, { timeout: 60000 }, async () => {

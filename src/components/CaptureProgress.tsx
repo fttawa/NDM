@@ -5,6 +5,7 @@ import { bytes, eta, percent, speed } from "../lib/format";
 import { AnimatedNumber } from "./Animated";
 import { FileIcon, SegmentBar, StatusChip } from "./TaskCard";
 import { Switch } from "./ui";
+import { CaptureControls } from "./CaptureControls";
 
 const AUTO_CLOSE_KEY = "ndm.captureAutoClose";
 const fmtPct = (n: number) => `${n.toFixed(1)}%`;
@@ -75,6 +76,7 @@ export function CaptureProgress({ initial, onClose }: { initial: Task; onClose: 
             <span>{task.total == null ? "大小未知" : bytes(task.total)}</span>
           </div>
         </div>
+        <CaptureControls />
         <button className="icon-btn ghost" onClick={onClose} title="隐藏（继续在后台下载）" aria-label="隐藏">
           <X size={17} />
         </button>
@@ -87,7 +89,7 @@ export function CaptureProgress({ initial, onClose }: { initial: Task; onClose: 
             <AnimatedNumber value={done ? task.total ?? 0 : task.downloaded} format={bytes} /> / {bytes(task.total)}
           </span>
         </div>
-        <SegmentBar task={task} tall />
+        {!done && <SegmentBar task={task} tall />}
       </div>
 
       <div className="cp-stats">

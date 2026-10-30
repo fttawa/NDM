@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api, type Progress, type Settings, type Task } from "./lib/api";
+import { arrangeTasks } from "./lib/task-list";
 
 /** 新建任务弹窗的预填内容；来自浏览器扩展时带有文件名、大小与请求头 */
 export interface AddPrefill {
@@ -12,7 +13,7 @@ export interface AddPrefill {
 }
 
 export type Filter = "all" | "active" | "waiting" | "completed" | "paused" | "error";
-export type View = "home" | "tasks" | "settings" | "bt-settings" | "bt-detail";
+export type View = "home" | "tasks" | "settings" | "bt-settings" | "bt-detail" | "schedule";
 
 export const DOWNLOAD_FILTERS: { value: Filter; label: string }[] = [
   { value: "all", label: "全部下载" },
@@ -42,6 +43,7 @@ interface State {
   /** 上一次点选的任务（Shift 区间选择的起点） */
   lastChecked: string | null;
   confirmIds: string[] | null;
+  refreshId: string | null;
   toast: string | null;
 
   init: () => Promise<void>;
@@ -56,6 +58,7 @@ interface State {
   toggleCheck: (id: string, shift?: boolean) => void;
   setChecked: (ids: string[]) => void;
   askRemove: (ids: string[] | null) => void;
+  refreshLink: (id: string | null) => void;
   saveSettings: (patch: Partial<Settings>) => Promise<void>;
   showToast: (msg: string) => void;
 }
@@ -93,6 +96,7 @@ export const useStore = create<State>((set, get) => ({
     if (initPromise) return initPromise;
     initPromise = (async () => {
       await api.setBrowserUserAgent(navigator.userAgent);
+      await api.onSettings((settings) => set({ settings }));
       const [tasks, settings] = await Promise.all([api.getTasks(), api.getSettings()]);
       set({ tasks, settings });
       await api.onTasks((tasks) => {
@@ -146,7 +150,7 @@ export const useStore = create<State>((set, get) => ({
   },
   toggleCheck(id, shift) {
     const { checked, lastChecked, tasks, filter } = get();
-    const visible = filterTasks(tasks, filter).map((t) => t.id);
+    const visible = arrangeTasks(filterTasks(tasks, filter), get().settings?.taskView).map((t) => t.id);
     if (shift && lastChecked && visible.includes(lastChecked)) {
       const [a, b] = [visible.indexOf(lastChecked), visible.indexOf(id)].sort((x, y) => x - y);
       const range = visible.slice(a, b + 1);
@@ -160,6 +164,8 @@ export const useStore = create<State>((set, get) => ({
   },
   setChecked: (ids) => set({ checked: ids, lastChecked: ids.length ? get().lastChecked : null }),
   askRemove: (confirmIds) => set({ confirmIds }),
+  refreshId: null,
+  refreshLink: (refreshId) => set({ refreshId }),
 
   async saveSettings(patch) {
     const cur = get().settings;

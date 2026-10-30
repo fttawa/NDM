@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AddTaskModal, ConfirmRemoveModal } from "./components/Modals";
+import { AddTaskModal, ConfirmRemoveModal, RefreshLinkModal } from "./components/Modals";
 import { SettingsView } from "./components/SettingsView";
 import { Sidebar, TitleBar, Toast } from "./components/Shell";
 import { TaskDrawer } from "./components/TaskDrawer";
@@ -8,6 +8,7 @@ import { TasksView } from "./components/TasksView";
 import { BtSettingsView } from "./components/BtSettingsView";
 import { BtDetailView } from "./components/BtDetailView";
 import { UpdateNotice } from "./components/UpdateNotice";
+import { CompletionNotice, ScheduleView } from "./components/ScheduleView";
 import { api, isTauri, readClipboard, type Settings } from "./lib/api";
 import { extractUrls } from "./lib/format";
 import { filterTasks, useStore } from "./store";
@@ -55,7 +56,7 @@ export default function App() {
       if (!text || text === lastClip.current) return;
       lastClip.current = text;
       const s = useStore.getState();
-      if (s.addOpen) return;
+      if (s.addOpen || s.refreshId) return;
       const urls = extractUrls(text).filter((u) => !s.tasks.some((t) => t.url === u));
       if (urls.length) openAdd(urls.join("\n"));
     };
@@ -69,12 +70,12 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
         e.preventDefault();
-        openAdd();
+        if (!useStore.getState().refreshId) openAdd();
         return;
       }
       // 任务多选快捷键：仅在任务页、无弹窗/抽屉、焦点不在输入框时生效
       const s = useStore.getState();
-      if (s.view !== "tasks" || s.addOpen || s.confirmIds || s.selectedId || isEditable(e.target)) return;
+      if (s.view !== "tasks" || s.addOpen || s.refreshId || s.confirmIds || s.selectedId || isEditable(e.target)) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
         e.preventDefault();
         s.setChecked(filterTasks(s.tasks, s.filter).map((t) => t.id));
@@ -85,7 +86,7 @@ export default function App() {
       }
     };
     const onPaste = (e: ClipboardEvent) => {
-      if (isEditable(e.target) || useStore.getState().addOpen) return;
+      if (isEditable(e.target) || useStore.getState().addOpen || useStore.getState().refreshId) return;
       const urls = extractUrls(e.clipboardData?.getData("text") ?? "");
       if (urls.length) openAdd(urls.join("\n"));
     };
@@ -103,12 +104,14 @@ export default function App() {
       <Sidebar />
       <main className="main">
         <TitleBar />
-        <div className="content" key={`${view}-${filter}`}>{view === "home" ? <HomeView /> : view === "tasks" ? <TasksView /> : view === "bt-detail" ? <BtDetailView /> : view === "bt-settings" ? <BtSettingsView /> : <SettingsView />}</div>
+        <div className="content" key={`${view}-${filter}`}>{view === "home" ? <HomeView /> : view === "tasks" ? <TasksView /> : view === "bt-detail" ? <BtDetailView /> : view === "bt-settings" ? <BtSettingsView /> : view === "schedule" ? <ScheduleView /> : <SettingsView />}</div>
       </main>
       <TaskDrawer />
       <UpdateNotice />
+      <CompletionNotice />
       <AddTaskModal />
       <ConfirmRemoveModal />
+      <RefreshLinkModal />
       <Toast />
     </div>
   );

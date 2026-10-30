@@ -27,6 +27,7 @@ const settingLabels: Record<keyof Settings, string> = {
   browserIntegration: "浏览器集成", captureConfirm: "下载确认框", proxyMode: "代理模式", proxyUrl: "代理地址", overclock: "连接超频",
   bt: "BT 下载配置",
   autoUpdate: "自动更新", updateMirrors: "更新镜像回退",
+  captureOnTop: "下载小窗置顶", taskView: "下载列表视图", downloadWindow: "允许下载时段",
 };
 
 function Tile({ icon, title, desc, className = "", children }: { icon: React.ReactNode; title: string; desc?: string; className?: string; children: React.ReactNode }) {
@@ -179,7 +180,7 @@ export function SettingsView() {
           </div>
         </Tile>
 
-        <Tile icon={<Network size={18} />} title="代理" desc="HTTP / HLS 下载代理，BT Peer 连接使用直连" className="span-2">
+        <Tile icon={<Network size={18} />} title="代理" desc="HTTP / HLS 下载代理；BT 代理在 BT 下载页独立配置" className="span-2">
           <div className="set-row">
             <span>模式</span>
             <Segmented
@@ -248,6 +249,7 @@ export function SettingsView() {
             <span>拦截到下载时弹出确认框</span>
             <Switch checked={settings.captureConfirm} onChange={(v) => set("captureConfirm", v)} />
           </label>
+          <label className="set-row"><span>下载小窗始终置顶</span><Switch label="下载小窗始终置顶" checked={settings.captureOnTop} onChange={v => set("captureOnTop", v)} /></label>
           <div className="set-row">
             <span className={`small ${bridge?.running ? "ok" : bridge?.error ? "warn" : "muted"}`}>
               {bridge?.running ? `正在监听 127.0.0.1:${bridge.port}` : bridge?.error ?? "已关闭"}

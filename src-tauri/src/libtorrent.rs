@@ -180,6 +180,7 @@ pub async fn run(mgr: &Arc<Manager>, id: &str, rt: &Arc<ActiveRt>) -> Result<(),
         "directory":directory,"hash":source.info_hash,"version":source.version,"limit":limit,"bt":bt});
     send(&mut stdin, config).await?;
     let mut stopping = false;
+    let mut reconnect = false;
     let mut complete = false;
     let mut stop_deadline = tokio::time::Instant::now() + Duration::from_secs(86400 * 365);
     let mut tick = tokio::time::interval(Duration::from_millis(250));
@@ -193,6 +194,12 @@ pub async fn run(mgr: &Arc<Manager>, id: &str, rt: &Arc<ActiveRt>) -> Result<(),
             _ = tokio::time::sleep_until(stop_deadline), if stopping => { break Err(DlError::Cancelled); }
             _ = tick.tick() => {
                 let next_bt = mgr.settings().bt;
+                if next_bt.proxy != bt.proxy && !stopping {
+                    reconnect = true;
+                    stopping = true;
+                    stop_deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+                    if let Err(error) = send(&mut stdin, serde_json::json!({"type":"stop"})).await { break Err(error); }
+                }
                 if next_bt != bt && !stopping {
                     bt = next_bt;
                     if let Err(error) = send(&mut stdin, serde_json::json!({"type":"configure","bt":bt})).await { break Err(error); }
@@ -259,7 +266,9 @@ pub async fn run(mgr: &Arc<Manager>, id: &str, rt: &Arc<ActiveRt>) -> Result<(),
             Ordering::Release,
         );
     }
-    if stopping {
+    if reconnect {
+        Err(DlError::Restart)
+    } else if stopping {
         Err(DlError::Cancelled)
     } else {
         result

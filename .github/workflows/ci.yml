@@ -5,9 +5,17 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   checks:
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,16 +34,44 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
       - name: Frontend build
         run: pnpm build
+
+      - name: Release version consistency
+        run: node scripts/verify-release.mjs
 
       - name: Native build tools
         run: choco install nasm strawberryperl ninja --no-progress -y
 
+      - name: Cache native dependencies
+        uses: actions/cache@v4
+        with:
+          key: native-deps-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageVersion }}-${{ hashFiles('scripts/build-bt-helper.ps1') }}
+          path: |
+            .native-build/*.tar.gz
+            .native-build/boost_1_88_0
+            .native-build/openssl-3.5.9
+            .native-build/openssl-install
+            .native-build/libtorrent
+            .native-build/json
+
       - name: Build native libtorrent engine
         run: pnpm build:bt-helper
 
-      - name: BTv1 / BTv2 / hybrid local swarm tests
+      - name: BT swarm and SOCKS5 relay tests
         run: node scripts/test-bt-engine.mjs
 
       - name: Extension tests
@@ -44,7 +80,15 @@ jobs:
           node --test extension/media.test.mjs extension/sniffer.test.mjs
 
       - name: Rust tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
       - name: Rust lints
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+
+      - name: Upload native failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-build-logs
+          path: .native-build/*build.log
+          if-no-files-found: ignore

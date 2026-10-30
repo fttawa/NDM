@@ -17,6 +17,26 @@ pub fn get_tasks(m: M) -> Vec<Task> {
 }
 
 #[tauri::command]
+pub fn set_task_schedule(m: M, id: String, at: Option<u64>) -> Result<(), String> {
+    m.set_task_schedule(&id, at)
+}
+
+#[tauri::command]
+pub fn completion_status(m: M) -> crate::schedule::CompletionStatus {
+    m.completion_status()
+}
+
+#[tauri::command]
+pub fn arm_completion(m: M, action: Option<crate::schedule::PowerAction>) -> Result<(), String> {
+    m.arm_completion(action)
+}
+
+#[tauri::command]
+pub async fn refresh_link(m: M<'_>, id: String, url: String, restart: bool) -> Result<(), String> {
+    m.refresh_link(&id, &url, restart).await
+}
+
+#[tauri::command]
 pub fn bt_details(m: M, id: String) -> Result<Option<crate::bt_config::Runtime>, String> {
     m.bt_details(&id)
 }
@@ -59,10 +79,18 @@ pub fn set_settings(
     if s.glass != old_glass {
         refresh_glass(&app);
     }
+    if s.capture_on_top != old.capture_on_top {
+        for (label, window) in app.webview_windows() {
+            if crate::capture::is_capture_window(&label) {
+                let _ = window.set_always_on_top(s.capture_on_top);
+            }
+        }
+    }
     if s.auto_update && (!old.auto_update || s.update_mirrors != old.update_mirrors) {
         app.state::<Arc<crate::updater::Updates>>()
             .settings_changed();
     }
+    let _ = app.emit("ndm://settings", s.clone());
     Ok(s)
 }
 
@@ -182,6 +210,7 @@ pub async fn test_proxy(settings: Settings) -> Result<u64, String> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddArgs {
+    scheduled_at: Option<u64>,
     save_dir: Option<String>,
     file_name: Option<String>,
     file_names: Option<Vec<String>>,
@@ -206,6 +235,7 @@ pub fn add_tasks(m: M, urls: Vec<String>, options: AddArgs) -> Result<Vec<Task>,
             headers: options.headers,
             hls: options.hls,
             torrent: None,
+            scheduled_at: options.scheduled_at,
         },
     )
 }
@@ -244,6 +274,7 @@ pub async fn add_torrent_file(
             headers: vec![],
             hls: false,
             torrent: Some(source),
+            scheduled_at: options.scheduled_at,
         },
     )
 }

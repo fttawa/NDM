@@ -9,6 +9,8 @@ mod libtorrent;
 mod limiter;
 mod manager;
 mod model;
+mod power;
+mod schedule;
 mod storage;
 mod torrent;
 mod updater;
@@ -126,6 +128,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_tasks,
+            commands::set_task_schedule,
+            commands::completion_status,
+            commands::arm_completion,
+            commands::refresh_link,
             commands::bt_details,
             commands::bt_defaults,
             commands::bt_metadata,

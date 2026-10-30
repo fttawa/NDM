@@ -4,11 +4,12 @@ import { api, type BtSettings } from "../lib/api";
 import { useStore } from "../store";
 import { Switch } from "./ui";
 
-export function SettingsTabs({ active }: { active: "general" | "bt" }) {
+export function SettingsTabs({ active }: { active: "general" | "bt" | "schedule" }) {
   const setView = useStore(s => s.setView);
   return <nav className="settings-tabs" aria-label="设置分类">
     <button className={`chip-btn ${active === "general" ? "active" : ""}`} aria-current={active === "general" ? "page" : undefined} onClick={() => setView("settings")}>通用设置</button>
     <button className={`chip-btn ${active === "bt" ? "active" : ""}`} aria-current={active === "bt" ? "page" : undefined} onClick={() => setView("bt-settings")}>BT 下载</button>
+    <button className={`chip-btn ${active === "schedule" ? "active" : ""}`} aria-current={active === "schedule" ? "page" : undefined} onClick={() => setView("schedule")}>计划任务</button>
   </nav>;
 }
 
@@ -55,12 +56,23 @@ export function BtSettingsView() {
             <div className="set-title">连接与上传</div>
             <label className="field"><span>每任务 Peer 上限</span><input className="input" type="number" min={10} max={500} required value={draft.maxPeers} onChange={e => change("maxPeers", Number(e.target.value))} /><span className="muted small">10–500，默认 80；独立于 HTTP 连接数</span></label>
             <label className="field"><span>每任务上传限速（KB/s）</span><input className="input" type="number" min={0} max={1000000} required value={draft.uploadLimit} onChange={e => change("uploadLimit", Number(e.target.value))} /><span className="muted small">0 为不限速；下载完成后停止做种</span></label>
-            <p className="muted small">下载限速与并发队列沿用通用设置。BT 连接目前直接联网。</p>
+            <p className="muted small">下载限速与并发队列沿用通用设置。</p>
+          </div>
+          <div className="tile glass set-tile">
+            <div className="set-row"><div><div className="set-title">SOCKS5 代理</div><div className="muted small">独立于通用设置中的 HTTP 代理</div></div><Switch label="BT SOCKS5 代理" checked={draft.proxy.enabled} onChange={enabled => change("proxy", { ...draft.proxy, enabled })} /></div>
+            {draft.proxy.enabled && <>
+              <label className="field"><span>代理主机</span><input className="input mono" required value={draft.proxy.host} placeholder="127.0.0.1" onChange={e => change("proxy", { ...draft.proxy, host: e.target.value })} /></label>
+              <label className="field"><span>代理端口</span><input className="input" type="number" required min={1} max={65535} value={draft.proxy.port} onChange={e => change("proxy", { ...draft.proxy, port: Number(e.target.value) })} /></label>
+              <label className="field"><span>代理用户名（可选）</span><input className="input" autoComplete="off" value={draft.proxy.username} onChange={e => change("proxy", { ...draft.proxy, username: e.target.value })} /></label>
+              <label className="field"><span>代理密码（可选）</span><input className="input" type="password" autoComplete="new-password" value={draft.proxy.password} onChange={e => change("proxy", { ...draft.proxy, password: e.target.value })} /></label>
+            </>}
+            <p className="muted small">{draft.proxy.enabled ? "Peer、Tracker 经代理，Tracker 域名由代理解析；DHT / UDP Tracker / uTP 需要代理支持 UDP ASSOCIATE。代理不可达时不会回退直连，局域网发现和端口映射暂时关闭。代理变更后任务自动重新连接。" : "当前 BT 直接联网。开启后，代理配置随本地设置与备份保存。"}</p>
           </div>
           <div className="tile glass set-tile">
             <label className="field" htmlFor="bt-nodes"><b>DHT 引导节点</b><span className="muted small">每行一个 host:port，内置 3 个引导节点，可自行修改</span></label>
             <textarea id="bt-nodes" className="input mono bt-addresses" spellCheck={false} value={nodes} onChange={e => setNodes(e.target.value)} rows={5} />
             <p className="muted small">引导节点帮助加入 DHT 网络，并非资源服务器。启用 DHT 时至少保留一项；网络不可达时可换用其他节点。</p>
+            {draft.proxy.enabled && draft.dht && <p className="muted small">DHT 引导节点的域名仍由系统 DNS 解析；可填写 IP 地址，后续 DHT 数据经代理传输。</p>}
           </div>
           <div className="tile glass set-tile">
             <label className="field" htmlFor="bt-trackers"><b>补充 Tracker</b><span className="muted small">每行一个 UDP / HTTP / HTTPS 地址，最多 128 条</span></label>

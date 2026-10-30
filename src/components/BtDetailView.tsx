@@ -4,6 +4,7 @@ import { api, writeClipboard, type BtRuntime } from "../lib/api";
 import { bytes, dateTime, eta, percent, speed } from "../lib/format";
 import { useStore } from "../store";
 import { StatusChip } from "./TaskCard";
+import { TaskSchedule } from "./ScheduleView";
 
 const phases: Record<BtRuntime["phase"], string> = { metadata: "正在获取种子元数据", checking: "正在校验已有分片", preparing: "正在准备文件", downloading: "正在下载" };
 const trackerStates = { working: "已响应", announcing: "连接中", waiting: "等待公告", error: "连接失败" };
@@ -53,6 +54,7 @@ export function BtDetailView() {
       {!active && task.status !== "waiting" && <button className="btn glass" onClick={() => action(() => api.redownload(task.id))}><RotateCcw size={15} /> 重新下载</button>}
       <button className="btn glass danger" onClick={() => askRemove([task.id])}><Trash2 size={15} /> 删除</button>
     </div>
+    <TaskSchedule task={task} />
     {task.error && <p className="err" role="alert">{task.error}</p>}
     {error && <p className="err" role="alert">详情更新失败：{error}</p>}
     <section className="tile glass bt-progress">
@@ -74,7 +76,7 @@ export function BtDetailView() {
         <dt>内容目录</dt><dd className="mono">{task.saveDir}\{task.fileName}</dd>
         <dt>创建时间</dt><dd>{dateTime(task.createdAt)}</dd>
         {task.finishedAt && <><dt>完成时间</dt><dd>{dateTime(task.finishedAt)}</dd></>}
-        <dt>连接方式</dt><dd>直接联网 · {priv ? "仅使用种子原有 Tracker" : "种子 Tracker 与补充 Tracker 合并"}</dd>
+        <dt>连接方式</dt><dd>{live ? live.proxy ? "SOCKS5 代理" : "直接联网" : settings?.bt.proxy.enabled ? "SOCKS5 代理（待连接）" : "直接联网"} · {priv ? "仅使用种子原有 Tracker" : "种子 Tracker 与补充 Tracker 合并"}</dd>
       </dl></section>
     </>}
     {tab === "files" && <section className="tile glass bt-files">

@@ -2434,7 +2434,7 @@ dependencies = [
 
 [[package]]
 name = "ndm"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "base64 0.22.1",
  "fs2",
@@ -2459,6 +2459,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

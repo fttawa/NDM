@@ -1,5 +1,6 @@
 #include "common.hpp"
 #include <libtorrent/ip_filter.hpp>
+#include <libtorrent/socks5_stream.hpp>
 
 // Windows pipe polling keeps all libtorrent calls on one thread and lets parent EOF
 // stop a download without a resident command server or detached reader thread.
@@ -75,12 +76,32 @@ int rate(json const& value) {
     return static_cast<int>((std::min)(value.get<std::uint64_t>(), std::uint64_t(INT_MAX)));
 }
 
-lt::settings_pack bt_settings(json const& bt, bool local) {
-    lt::settings_pack s;
+lt::settings_pack bt_settings(json const& bt, bool local, lt::settings_pack s = {}) {
+    auto proxy = bt.value("proxy", json::object());
+    bool proxied = proxy.value("enabled", false);
+    if (proxied) {
+        auto host = proxy.value("host", std::string{});
+        auto port = proxy.value("port", 0);
+        auto username = proxy.value("username", std::string{}), password = proxy.value("password", std::string{});
+        if (host.empty() || port < 1 || port > 65535 || username.size() > 255 || password.size() > 255 || (username.empty() && !password.empty()))
+            throw std::runtime_error("Invalid BT SOCKS5 proxy settings");
+        if (host.front() == '[' && host.back() == ']') host = host.substr(1, host.size() - 2);
+        s.set_int(lt::settings_pack::proxy_type, username.empty() ? lt::settings_pack::socks5 : lt::settings_pack::socks5_pw);
+        s.set_str(lt::settings_pack::proxy_hostname, host);
+        s.set_int(lt::settings_pack::proxy_port, port);
+        s.set_str(lt::settings_pack::proxy_username, username);
+        s.set_str(lt::settings_pack::proxy_password, password);
+        s.set_int(lt::settings_pack::alert_mask, lt::alert_category::error | lt::alert_category::status | lt::alert_category::storage | lt::alert_category::peer);
+    } else {
+        s.set_int(lt::settings_pack::proxy_type, lt::settings_pack::none);
+    }
+    s.set_bool(lt::settings_pack::proxy_hostnames, true);
+    s.set_bool(lt::settings_pack::proxy_peer_connections, true);
+    s.set_bool(lt::settings_pack::proxy_tracker_connections, true);
     s.set_bool(lt::settings_pack::enable_dht, !local && bt.value("dht", true));
-    s.set_bool(lt::settings_pack::enable_lsd, !local && bt.value("lsd", false));
-    s.set_bool(lt::settings_pack::enable_upnp, !local && bt.value("upnp", false));
-    s.set_bool(lt::settings_pack::enable_natpmp, !local && bt.value("upnp", false));
+    s.set_bool(lt::settings_pack::enable_lsd, !local && !proxied && bt.value("lsd", false));
+    s.set_bool(lt::settings_pack::enable_upnp, !local && !proxied && bt.value("upnp", false));
+    s.set_bool(lt::settings_pack::enable_natpmp, !local && !proxied && bt.value("upnp", false));
     s.set_int(lt::settings_pack::connections_limit, std::clamp(bt.value("maxPeers", 80), 10, 500));
     s.set_int(lt::settings_pack::upload_rate_limit, rate(json(bt.value("uploadLimit", std::uint64_t(0)) * 1024)));
     if (bt.contains("bootstrapNodes")) {
@@ -128,10 +149,10 @@ void run(json const& config, Input& input) {
     }
     auto s = settings(config.value("localTest", false));
     s.set_int(lt::settings_pack::download_rate_limit, rate(config.value("limit", json(0))));
-    lt::session session(s);
     bool local = config.value("localTest", false);
     json bt = config.value("bt", json::object());
-    session.apply_settings(bt_settings(bt, local));
+    // Configure the proxy before creating any listen / DHT sockets.
+    lt::session session(bt_settings(bt, local, s));
     // Apply the global limiter to LAN peers too, using the supported peer-class API.
     lt::ip_filter filter;
     filter.add_rule(lt::make_address("0.0.0.0"), lt::make_address("255.255.255.255"), 1);
@@ -205,6 +226,8 @@ void run(json const& config, Input& input) {
                 lt::settings_pack change; change.set_int(lt::settings_pack::download_rate_limit, rate(command.at("bps")));
                 session.apply_settings(change);
             } else if (command.at("type") == "configure") {
+                if (command.at("bt").value("proxy", json::object()) != bt.value("proxy", json::object()))
+                    throw std::runtime_error("Changing BT proxy requires restarting the session");
                 bt = command.at("bt"); session.apply_settings(bt_settings(bt, local));
                 if (!bt.value("dht", true)) dht_nodes = 0;
                 apply_torrent_settings(); details_at = Clock::time_point::min();
@@ -217,6 +240,18 @@ void run(json const& config, Input& input) {
         }
         std::vector<lt::alert*> alerts; session.pop_alerts(&alerts);
         for (auto alert : alerts) {
+            if (bt.value("proxy", json::object()).value("enabled", false)) {
+                // TCP authentication failures are reported by Peer / Tracker
+                // alerts; UDP association failures use socks5_alert instead.
+                lt::error_code error;
+                if (auto failure = lt::alert_cast<lt::socks5_alert>(alert)) error = failure->error;
+                else if (auto failure = lt::alert_cast<lt::peer_error_alert>(alert)) {
+                    if (failure->error.category() == lt::socks_category()) error = failure->error;
+                } else if (auto failure = lt::alert_cast<lt::tracker_error_alert>(alert)) {
+                    if (failure->error.category() == lt::socks_category()) error = failure->error;
+                }
+                if (error) throw std::runtime_error("SOCKS5 proxy connection failed: " + error.message());
+            }
             if (auto stats = lt::alert_cast<lt::dht_stats_alert>(alert)) {
                 dht_nodes = 0; for (auto const& bucket : stats->routing_table) dht_nodes += bucket.num_nodes;
             } else if (auto saved = lt::alert_cast<lt::save_resume_data_alert>(alert)) {
@@ -259,6 +294,7 @@ void run(json const& config, Input& input) {
                     {"totalPieces", status.has_metadata ? handle.torrent_file()->num_pieces() : 0}, {"fileProgress", files},
                     {"dht", !priv && !local && bt.value("dht", true)}, {"pex", !priv && !local && bt.value("pex", true)},
                     {"private", priv}, {"maxPeers", bt.value("maxPeers", 80)}, {"uploadLimit", bt.value("uploadLimit", 0)},
+                    {"proxy", bt.value("proxy", json::object()).value("enabled", false)},
                     {"trackers", tracker_details(handle)}};
                 if (!local && bt.value("dht", true)) session.post_dht_stats();
                 details_at = now;

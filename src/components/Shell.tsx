@@ -48,7 +48,7 @@ export function Sidebar() {
         </button>
       </div>
       <div className="nav-footer">
-        <button className={`nav-btn ${view === "settings" || view === "bt-settings" ? "active" : ""}`} onClick={() => setView("settings")} aria-current={view === "settings" || view === "bt-settings" ? "page" : undefined}>
+        <button className={`nav-btn ${view === "settings" || view === "bt-settings" || view === "schedule" ? "active" : ""}`} onClick={() => setView("settings")} aria-current={view === "settings" || view === "bt-settings" || view === "schedule" ? "page" : undefined}>
           <Settings2 size={18} /><span>设置</span>
         </button>
       </div>

@@ -1,7 +1,9 @@
-import { Inbox, Layers, MoreHorizontal, Pause, Play, Plus, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
+import { ArrowDownWideNarrow, Inbox, Layers, LayoutGrid, List, MoreHorizontal, Pause, Play, Plus, RotateCcw, SlidersHorizontal, Sparkles, Trash2, X } from "lucide-react";
 import { useEffect } from "react";
 import { useFlip } from "./Animated";
-import { api, type Task } from "../lib/api";
+import { api, type Task, type TaskViewOptions } from "../lib/api";
+import { arrangeTasks, taskGroup } from "../lib/task-list";
+import { Switch } from "./ui";
 import { bytes } from "../lib/format";
 import { DOWNLOAD_FILTERS, filterTasks, useStore } from "../store";
 import { TaskCard } from "./TaskCard";
@@ -54,7 +56,12 @@ export function TasksView() {
   const tasks = useStore((s) => s.tasks);
   const filter = useStore((s) => s.filter);
   const openAdd = useStore((s) => s.openAdd);
-  const list = filterTasks(tasks, filter);
+  const options = useStore(s => s.settings?.taskView);
+  const save = useStore(s => s.saveSettings);
+  const change = (patch: Partial<TaskViewOptions>) => options && save({ taskView: { ...options, ...patch } });
+  const list = arrangeTasks(filterTasks(tasks, filter), options);
+  const groups = new Map<string, Task[]>();
+  for (const task of list) { const key = taskGroup(task, options?.group ?? "none"); const group = groups.get(key) ?? []; group.push(task); groups.set(key, group); }
   const flipRef = useFlip(`${filter}|${list.map((t) => t.id).join(",")}`);
   const checkedCount = useStore((s) => s.checked.length);
 
@@ -74,9 +81,18 @@ export function TasksView() {
         <div>
           <h1>下载 <span className="page-count">{tasks.length}</span></h1>
         </div>
-        <button className="btn primary" onClick={() => openAdd()}>
+        <div className="toolbar-actions"><details className="download-more view-options">
+          <summary aria-label="下载视图选项" title="视图与排序"><SlidersHorizontal size={18} /></summary>
+          <div className="download-menu glass-strong">
+            <div className="set-row"><button className={`chip-btn ${options?.layout === "cards" ? "active" : ""}`} aria-pressed={options?.layout === "cards"} onClick={() => change({ layout: "cards" })}><LayoutGrid size={15} /> 卡片</button><button className={`chip-btn ${options?.layout === "list" ? "active" : ""}`} aria-pressed={options?.layout === "list"} onClick={() => change({ layout: "list" })}><List size={15} /> 紧凑列表</button></div>
+            <label className="field"><span>排序方式</span><select className="input" aria-label="排序方式" value={options?.sort ?? "created"} onChange={e => change({ sort: e.target.value as TaskViewOptions["sort"] })}><option value="created">添加时间</option><option value="name">文件名称</option><option value="type">文件类型</option><option value="size">文件大小</option></select></label>
+            <button className="btn glass" aria-label="切换排序方向" onClick={() => change({ descending: !options?.descending })}><ArrowDownWideNarrow size={15} />{options?.descending ? "降序" : "升序"}</button>
+            <label className="field"><span>分组方式</span><select className="input" aria-label="分组方式" value={options?.group ?? "none"} onChange={e => change({ group: e.target.value as TaskViewOptions["group"] })}><option value="none">不分组</option><option value="date">添加日期</option><option value="type">文件类型</option><option value="status">下载状态</option></select></label>
+            <div className="set-row"><span>显示下载百分比</span><Switch label="显示下载百分比" checked={options?.showPercentage ?? true} onChange={showPercentage => change({ showPercentage })} /></div>
+          </div>
+        </details><button className="btn primary" onClick={() => openAdd()}>
           <Plus size={17} /> 新建任务
-        </button>
+        </button></div>
       </header>
 
       <div className="toolbar">
@@ -110,13 +126,15 @@ export function TasksView() {
           <div className="muted">点击「新建任务」，或直接按 Ctrl+V 粘贴链接</div>
         </div>
       ) : (
-        <div className="task-grid">
-          {list.map((t) => (
+        <div className="task-groups">{Array.from(groups, ([group, items]) => <section key={group}>
+          {group && <h2 className="task-group-title">{group}<span className="muted small">{items.length}</span></h2>}
+          <div className={options?.layout === "list" ? "task-list" : "task-grid"}>
+          {items.map((t) => (
             <div key={t.id} ref={flipRef(t.id)} className="flip-item">
-              <TaskCard task={t} />
+              <TaskCard task={t} compact={options?.layout === "list"} />
             </div>
           ))}
-        </div>
+          </div></section>)}</div>
       )}
     </div>
   );
