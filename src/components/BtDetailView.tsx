@@ -5,6 +5,7 @@ import { bytes, dateTime, eta, percent, speed } from "../lib/format";
 import { useStore } from "../store";
 import { StatusChip } from "./TaskCard";
 import { TaskSchedule } from "./ScheduleView";
+import { useSlidingIndicator } from "./Animated";
 
 const phases: Record<BtRuntime["phase"], string> = { metadata: "正在获取种子元数据", checking: "正在校验已有分片", preparing: "正在准备文件", downloading: "正在下载" };
 const trackerStates = { working: "已响应", announcing: "连接中", waiting: "等待公告", error: "连接失败" };
@@ -20,6 +21,7 @@ export function BtDetailView() {
   const [runtime, setRuntime] = useState<BtRuntime | null>(null);
   const [error, setError] = useState("");
   const [tab, setTab] = useState<"overview" | "files" | "trackers">("overview");
+  const tabsRef = useSlidingIndicator<HTMLElement>("button.active", tab);
   const [filePage, setFilePage] = useState(0);
   useEffect(() => {
     if (task?.id) void api.btMetadata(task.id).catch(e => toast(String(e)));
@@ -62,7 +64,7 @@ export function BtDetailView() {
       <div className="bt-progress-track" role="progressbar" aria-label="BT 下载进度" aria-valuenow={task.total == null ? undefined : pct} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${pct}%` }} /></div>
       <div className="bt-sub muted small"><span>{active && task.total ? `预计剩余 ${eta(task.total - task.downloaded, task.speed)}` : total ? `${total} 个文件` : "等待种子元数据"}</span><span>{live ? `已取得 ${live.pieces} / ${live.totalPieces} 个分片` : source.pieceCount ? `${source.pieceCount} 个分片 · 每片 ${bytes(source.pieceLength ?? 0)}` : ""}</span></div>
     </section>
-    <nav className="settings-tabs" aria-label="BT 任务详情分类">{([['overview','概览'],['files',`文件（${total}）`],['trackers',`Tracker（${trackers.length}）`]] as const).map(([key,label]) => <button key={key} className={`chip-btn ${tab === key ? "active" : ""}`} aria-pressed={tab === key} onClick={() => setTab(key)}>{label}</button>)}</nav>
+    <nav ref={tabsRef} className="settings-tabs" aria-label="BT 任务详情分类">{([['overview','概览'],['files',`文件（${total}）`],['trackers',`Tracker（${trackers.length}）`]] as const).map(([key,label]) => <button key={key} className={`chip-btn ${tab === key ? "active" : ""}`} aria-pressed={tab === key} onClick={() => setTab(key)}>{label}</button>)}</nav>
     {tab === "overview" && <>
       <section className="bt-metrics">
         <div className="tile glass"><span className="muted small">下载速度</span><b>{active ? speed(task.speed) : "--"}</b></div>

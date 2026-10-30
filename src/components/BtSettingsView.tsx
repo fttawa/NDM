@@ -3,10 +3,29 @@ import { Network, RotateCcw, Save } from "lucide-react";
 import { api, type BtSettings } from "../lib/api";
 import { useStore } from "../store";
 import { Switch } from "./ui";
+import { useSlidingIndicator } from "./Animated";
+import type { ReactNode } from "react";
+
+const settingsHeads = {
+  general: { title: "设置", desc: "修改会自动保存" },
+  bt: { title: "BT 下载配置", desc: "管理资源发现与连接，应用后对正在下载的 BT 任务生效" },
+  schedule: { title: "计划任务", desc: "按系统本地时间运行，软件需保持打开或驻留托盘" },
+};
+
+/** 设置页外壳：标题与分类标签常驻，切换分类时只替换下方内容 */
+export function SettingsShell({ active, children }: { active: "general" | "bt" | "schedule"; children: ReactNode }) {
+  const head = settingsHeads[active];
+  return <div className="view">
+    <header className="view-head"><div key={active} className="head-swap"><h1>{head.title}</h1><p className="muted">{head.desc}</p></div></header>
+    <SettingsTabs active={active} />
+    <div key={active} className="settings-pane">{children}</div>
+  </div>;
+}
 
 export function SettingsTabs({ active }: { active: "general" | "bt" | "schedule" }) {
   const setView = useStore(s => s.setView);
-  return <nav className="settings-tabs" aria-label="设置分类">
+  const ref = useSlidingIndicator<HTMLElement>("button.active", active);
+  return <nav ref={ref} className="settings-tabs" aria-label="设置分类">
     <button className={`chip-btn ${active === "general" ? "active" : ""}`} aria-current={active === "general" ? "page" : undefined} onClick={() => setView("settings")}>通用设置</button>
     <button className={`chip-btn ${active === "bt" ? "active" : ""}`} aria-current={active === "bt" ? "page" : undefined} onClick={() => setView("bt-settings")}>BT 下载</button>
     <button className={`chip-btn ${active === "schedule" ? "active" : ""}`} aria-current={active === "schedule" ? "page" : undefined} onClick={() => setView("schedule")}>计划任务</button>
@@ -29,9 +48,7 @@ export function BtSettingsView() {
   const change = <K extends keyof BtSettings>(key: K, value: BtSettings[K]) => setDraft({ ...draft, [key]: value });
   const next = { ...draft, bootstrapNodes: lines(nodes), trackers: lines(trackers) };
   const dirty = JSON.stringify(next) !== JSON.stringify(saved);
-  return <div className="view bt-settings">
-    <header className="view-head"><div><h1>BT 下载配置</h1><p className="muted">管理资源发现与连接，应用后对正在下载的 BT 任务生效</p></div></header>
-    <SettingsTabs active="bt" />
+  return <div className="bt-settings">
     <form onSubmit={async e => {
       e.preventDefault(); const settings = useStore.getState().settings; if (!settings || busy) return;
       setBusy(true); setError("");

@@ -3,7 +3,6 @@ import { Clock3, Power } from "lucide-react";
 import { api, type CompletionStatus, type PowerAction, type Task } from "../lib/api";
 import { dateTime } from "../lib/format";
 import { useStore } from "../store";
-import { SettingsTabs } from "./BtSettingsView";
 import { Switch } from "./ui";
 import { useLatest, usePresence } from "./Animated";
 
@@ -43,7 +42,7 @@ export function ScheduleView() {
   const pending = tasks.filter(t => t.status !== "completed");
   const planned = tasks.filter(t => t.scheduledAt && t.status !== "completed");
   if (!settings) return null;
-  return <div className="view"><header className="view-head"><div><h1>计划任务</h1><p className="muted">按系统本地时间运行，软件需保持打开或驻留托盘</p></div></header><SettingsTabs active="schedule" />
+  return <div>
     <div className="schedule-grid">
       <form className="tile glass set-tile" onSubmit={async e => {
         e.preventDefault(); setBusy(true); setError("");

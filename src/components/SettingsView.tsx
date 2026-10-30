@@ -15,7 +15,6 @@ import { api, pickDirectory, pickExportPath, pickImportPath, writeClipboard, typ
 import { useStore } from "../store";
 import { Segmented, Slider, Switch } from "./ui";
 import { Modal } from "./Modals";
-import { SettingsTabs } from "./BtSettingsView";
 import { ReleaseNotes } from "./ReleaseNotes";
 import { updateBusy, updateLabels, useUpdateStatus } from "./UpdateNotice";
 import { bytes, dateTime } from "../lib/format";
@@ -98,15 +97,7 @@ export function SettingsView() {
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => save({ [k]: v } as Partial<Settings>);
 
   return (
-    <div className="view">
-      <header className="view-head">
-        <div>
-          <h1>设置</h1>
-          <p className="muted">修改会自动保存</p>
-        </div>
-      </header>
-
-      <SettingsTabs active="general" />
+    <div>
       <section className="bento settings-bento">
         <Tile icon={<FolderOpen size={18} />} title="默认下载目录" desc="新任务默认保存的位置" className="span-2">
           <div className="input-group">

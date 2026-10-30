@@ -5,7 +5,7 @@ import { Sidebar, TitleBar, Toast } from "./components/Shell";
 import { TaskDrawer } from "./components/TaskDrawer";
 import { HomeView } from "./components/HomeView";
 import { TasksView } from "./components/TasksView";
-import { BtSettingsView } from "./components/BtSettingsView";
+import { BtSettingsView, SettingsShell } from "./components/BtSettingsView";
 import { BtDetailView } from "./components/BtDetailView";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { CompletionNotice, ScheduleView } from "./components/ScheduleView";
@@ -19,6 +19,7 @@ const isEditable = (el: EventTarget | null) =>
 export default function App() {
   const init = useStore((s) => s.init);
   const view = useStore((s) => s.view);
+  const settingsTab = view === "settings" ? "general" : view === "bt-settings" ? "bt" : view === "schedule" ? "schedule" : null;
   const settings = useStore((s) => s.settings);
   const openAdd = useStore((s) => s.openAdd);
   const lastClip = useRef<string | null>(null);
@@ -103,7 +104,14 @@ export default function App() {
       <Sidebar />
       <main className="main">
         <TitleBar />
-        <div className="content" key={view}>{view === "home" ? <HomeView /> : view === "tasks" ? <TasksView /> : view === "bt-detail" ? <BtDetailView /> : view === "bt-settings" ? <BtSettingsView /> : view === "schedule" ? <ScheduleView /> : <SettingsView />}</div>
+        {/* 设置的三个分类共用一个外壳，切换分类时标题和标签不重建 */}
+        <div className="content" key={settingsTab ? "settings" : view}>
+          {view === "home" ? <HomeView /> : view === "tasks" ? <TasksView /> : view === "bt-detail" ? <BtDetailView /> : (
+            <SettingsShell active={settingsTab!}>
+              {settingsTab === "bt" ? <BtSettingsView /> : settingsTab === "schedule" ? <ScheduleView /> : <SettingsView />}
+            </SettingsShell>
+          )}
+        </div>
       </main>
       <TaskDrawer />
       <UpdateNotice />

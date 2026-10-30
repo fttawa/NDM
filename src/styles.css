@@ -1999,6 +1999,24 @@ details:not(.download-more)[open]::details-content {
   block-size: auto;
 }
 
+/* 设置分类与 BT 详情标签：选中背景滑动，标题与内容区交叉淡入 */
+.settings-tabs {
+  position: relative;
+  isolation: isolate;
+}
+.settings-tabs.has-ind::after {
+  border-radius: 10px;
+  background: var(--accent);
+}
+.head-swap {
+  animation: fade 0.25s ease;
+}
+.settings-pane,
+.bt-files,
+.bt-trackers {
+  animation: fade-up 0.3s var(--ease-out);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
