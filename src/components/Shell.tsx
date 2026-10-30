@@ -1,4 +1,4 @@
-import { ArrowDownToLine, House, Minus, Settings2, Square, X } from "lucide-react";
+import { ArrowDownToLine, House, Minus, Plus, Settings2, Square, X } from "lucide-react";
 import { windowAction } from "../lib/api";
 import { speed } from "../lib/format";
 import { useStore } from "../store";
@@ -33,12 +33,17 @@ export function TitleBar() {
 export function Sidebar() {
   const view = useStore((s) => s.view);
   const setView = useStore((s) => s.setView);
+  const openAdd = useStore((s) => s.openAdd);
 
   return (
     <nav className="sidebar" aria-label="主导航">
       <div className="logo" data-tauri-drag-region>
         <img src="/app-icon.svg" alt="" /><strong data-tauri-drag-region>NDM</strong>
       </div>
+      {/* MD3 导航栏顶部的 FAB，默认主题下隐藏 */}
+      <button className="rail-fab" onClick={() => openAdd()} aria-label="新建任务" title="新建任务 (Ctrl+N)">
+        <Plus size={24} />
+      </button>
       <div className="nav">
         <button className={`nav-btn ${view === "home" ? "active" : ""}`} onClick={() => setView("home")} aria-current={view === "home" ? "page" : undefined}>
           <House size={18} /><span>首页</span>

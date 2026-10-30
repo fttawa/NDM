@@ -60,6 +60,8 @@ export interface Settings {
   closeToTray: boolean;
   resumeOnStart: boolean;
   glass: "acrylic" | "mica" | "none";
+  /** 界面风格：默认深色中性灰，或 Material Design 3 */
+  theme: "default" | "md3";
   browserIntegration: boolean;
   captureConfirm: boolean;
   proxyMode: "system" | "none" | "custom";
@@ -364,6 +366,7 @@ function createMock(): Backend {
     closeToTray: true,
     resumeOnStart: true,
     glass: "acrylic",
+    theme: "default",
     browserIntegration: true,
     captureConfirm: true,
     captureOnTop: false,

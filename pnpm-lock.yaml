@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@fontsource/roboto':
+        specifier: 5.1.0
+        version: 5.1.0
       '@tauri-apps/api':
         specifier: ^2.12.4
         version: 2.12.4
@@ -50,6 +53,9 @@ importers:
         version: 8.3.5
 
 packages:
+
+  '@fontsource/roboto@5.1.0':
+    resolution: {integrity: sha512-cFRRC1s6RqPygeZ8Uw/acwVHqih8Czjt6Q0MwoUoDe9U3m4dH1HmNDRBZyqlMSFwgNAUKgFImncKdmDHyKpwdg==}
 
   '@oxc-project/types@0.155.0':
     resolution: {integrity: sha512-SeE8JPwW1xs1tHeNycjUtUBdhorRa8o4jlvjwk49R7/Z291i+4DQa7JJIgOm/TaYQZx+QrPQbVJ/9c8dMIZN8Q==}
@@ -474,6 +480,8 @@ packages:
         optional: true
 
 snapshots:
+
+  '@fontsource/roboto@5.1.0': {}
 
   '@oxc-project/types@0.155.0': {}
 

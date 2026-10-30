@@ -46,6 +46,7 @@ export function CaptureCard({ id }: { id: string }) {
     Promise.all([api.getCapture(id), api.getSettings(), api.getTasks()]).then(([c, s, tasks]) => {
       if (!c) return close();
       document.documentElement.dataset.glass = s.glass;
+      document.documentElement.dataset.theme = s.theme;
       setCap(c);
       setName(c.fileName || nameFromUrl(c.url));
       setDir(s.downloadDir);

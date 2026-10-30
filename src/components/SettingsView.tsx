@@ -22,7 +22,7 @@ import { bytes, dateTime } from "../lib/format";
 const settingLabels: Record<keyof Settings, string> = {
   downloadDir: "默认下载目录", maxConcurrent: "同时下载任务数", connections: "每任务连接数",
   speedLimit: "全局限速", userAgent: "User-Agent", notify: "完成通知", clipboardWatch: "剪贴板监听",
-  closeToTray: "关闭到托盘", resumeOnStart: "启动时继续下载", glass: "窗口材质",
+  closeToTray: "关闭到托盘", resumeOnStart: "启动时继续下载", glass: "窗口材质", theme: "界面风格",
   browserIntegration: "浏览器集成", captureConfirm: "下载确认框", proxyMode: "代理模式", proxyUrl: "代理地址", overclock: "连接超频",
   bt: "BT 下载配置",
   autoUpdate: "自动更新", updateMirrors: "更新镜像回退",
@@ -114,7 +114,18 @@ export function SettingsView() {
           </div>
         </Tile>
 
-        <Tile icon={<Palette size={18} />} title="外观" desc="窗口毛玻璃材质" className="span-2 row-2">
+        <Tile icon={<Palette size={18} />} title="外观" desc="界面风格与窗口材质" className="span-2 row-2">
+          <div className="set-row">
+            <span>界面风格</span>
+            <Segmented
+              value={settings.theme === "md3" ? "md3" : "default"}
+              onChange={(v) => set("theme", v)}
+              options={[
+                { value: "default", label: "默认" },
+                { value: "md3", label: "Material 3" },
+              ]}
+            />
+          </div>
           <div className="set-row">
             <span>窗口材质</span>
             <Segmented

@@ -147,6 +147,8 @@ pub struct Settings {
     pub resume_on_start: bool,
     /// acrylic | mica | none
     pub glass: String,
+    /// 界面风格：default（深色中性灰）| md3（Material Design 3）
+    pub theme: String,
     /// 启用浏览器扩展接入（本地 HTTP 服务）
     pub browser_integration: bool,
     /// 拦截到下载时先弹出确认框；关闭则直接开始
@@ -178,6 +180,7 @@ impl Default for Settings {
             close_to_tray: true,
             resume_on_start: true,
             glass: "acrylic".into(),
+            theme: "default".into(),
             browser_integration: true,
             capture_confirm: true,
             proxy_mode: "system".into(),

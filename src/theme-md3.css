@@ -1,0 +1,826 @@
+/* ============ 第二主题：Material Design 3（深色） ============
+   仅在 :root[data-theme="md3"] 时生效。
+   颜色：material-color-utilities 生成，Tonal Spot 方案，种子色 #3B6EA8。
+   组件按 m3.material.io 规范：导航栏（Navigation rail）、FAB、卡片、按钮、纸片、分段按钮、
+   标签页、外框文本框、开关、滑块、复选框、对话框、侧边面板、菜单、Snackbar、状态层与涟漪。 */
+
+@property --ripple-r {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --ripple-o {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 0%;
+}
+
+:root[data-theme="md3"] {
+  --md-primary: #a3c9fe;
+  --md-on-primary: #00315b;
+  --md-primary-container: #1e4875;
+  --md-on-primary-container: #d3e4ff;
+  --md-secondary: #bbc7db;
+  --md-secondary-container: #3c4758;
+  --md-on-secondary-container: #d7e3f8;
+  --md-error: #ffb4ab;
+  --md-on-error: #690005;
+  --md-surface: #111418;
+  --md-surface-low: #191c20;
+  --md-surface-container: #1d2024;
+  --md-surface-high: #272a2f;
+  --md-surface-highest: #32353a;
+  --md-on-surface: #e1e2e8;
+  --md-on-surface-variant: #c3c6cf;
+  --md-outline: #8d9199;
+  --md-outline-variant: #43474e;
+  --md-inverse-surface: #e1e2e8;
+  --md-inverse-on-surface: #2e3035;
+  --md-inverse-primary: #39608f;
+  /* 高度阴影 level 1–4 */
+  --md-elev-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px 1px rgba(0, 0, 0, 0.15);
+  --md-elev-2: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 6px 2px rgba(0, 0, 0, 0.15);
+  --md-elev-3: 0 1px 3px rgba(0, 0, 0, 0.3), 0 4px 8px 3px rgba(0, 0, 0, 0.15);
+  --md-elev-4: 0 2px 3px rgba(0, 0, 0, 0.3), 0 6px 10px 4px rgba(0, 0, 0, 0.15);
+  /* 动效：emphasized / standard */
+  --md-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --md-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+
+  /* 映射到应用通用令牌 */
+  --tint: var(--md-surface);
+  --tint-solid: var(--md-surface);
+  --glass: var(--md-surface-low);
+  --glass-hover: var(--md-surface-low);
+  --glass-strong: var(--md-surface-high);
+  --glass-border: transparent;
+  --overlay-shadow: var(--md-elev-3);
+  --line: var(--md-outline-variant);
+  --track: var(--md-surface-highest);
+  --text: var(--md-on-surface);
+  --text-2: var(--md-on-surface-variant);
+  --text-3: var(--md-outline);
+  --accent: var(--md-primary);
+  --accent-2: var(--md-outline);
+  --accent-rgb: 163, 201, 254;
+  --accent-soft: var(--md-secondary-container);
+  --on-accent: var(--md-on-primary);
+  --success: #9ad4a6;
+  --waiting: var(--md-on-surface-variant);
+  --danger: var(--md-error);
+  --side: var(--md-surface);
+  --side-text: var(--md-on-surface-variant);
+  --input: transparent;
+  --ease-out: var(--md-emphasized);
+}
+
+/* ---------- 字体与字号层级（Roboto；中文回退系统字体） ---------- */
+[data-theme="md3"] body {
+  font: 14px/20px Roboto, "Microsoft YaHei UI", "Noto Sans SC", "PingFang SC", system-ui, sans-serif;
+  letter-spacing: 0.25px;
+}
+[data-theme="md3"] .view-head h1 {
+  font-size: 28px;
+  line-height: 36px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+[data-theme="md3"] .set-title {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
+  letter-spacing: 0.15px;
+}
+[data-theme="md3"] .task-title .name,
+[data-theme="md3"] .empty-title {
+  font-weight: 500;
+  letter-spacing: 0.1px;
+}
+
+/* ---------- 表面：不透明色调层级 ---------- */
+[data-theme="md3"] .glass,
+[data-theme="md3"] .glass-strong {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-color: transparent;
+}
+[data-theme="md3"] .app-bg,
+[data-theme="md3"][data-glass] .app-bg {
+  background: var(--md-surface);
+}
+
+/* ---------- 状态层（悬停 8%、按下 10%）、焦点环与涟漪 ---------- */
+[data-theme="md3"] :is(.btn, .icon-btn, .rail-fab, .chip-btn, .segmented button, .download-filters button, .view-options-choices button, .download-more summary, .view-options-direction, .tile-stat-link, .tile-paste, .schedule-task):hover:not(:disabled) {
+  box-shadow: inset 0 0 0 100vmax color-mix(in srgb, currentColor 8%, transparent);
+}
+[data-theme="md3"] :is(.btn, .icon-btn, .rail-fab, .chip-btn, .segmented button, .download-filters button, .view-options-choices button):active:not(:disabled) {
+  box-shadow: inset 0 0 0 100vmax color-mix(in srgb, currentColor 10%, transparent);
+}
+[data-theme="md3"] :focus-visible {
+  outline: 3px solid var(--md-secondary);
+  outline-offset: 2px;
+}
+/* 涟漪：ripple.ts 用 WAAPI 驱动 --ripple-r / --ripple-o，这里画从按压点扩散的圆 */
+[data-theme="md3"] :is(.btn, .icon-btn, .rail-fab, .chip-btn, .segmented button, .download-filters button, .view-options-choices button, .task-card, .tile-stat-link, .tile-paste, .schedule-task) {
+  background-image: radial-gradient(
+    circle at var(--rx, 50%) var(--ry, 50%),
+    color-mix(in srgb, currentColor var(--ripple-o), transparent) calc(var(--ripple-r) * 0.92),
+    transparent var(--ripple-r)
+  ) !important;
+}
+
+/* ---------- 导航栏（Navigation rail）：宽 80，图标 + 下方文字，56×32 胶囊指示器 ---------- */
+[data-theme="md3"] .app {
+  grid-template-columns: 80px minmax(0, 1fr);
+}
+[data-theme="md3"] .sidebar {
+  margin: 0;
+  padding: 12px 0 20px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  align-items: center;
+  gap: 0;
+}
+[data-theme="md3"] .logo {
+  padding: 0;
+  margin-bottom: 12px;
+}
+[data-theme="md3"] .logo img {
+  width: 32px;
+  height: 32px;
+}
+[data-theme="md3"] .logo strong {
+  display: none;
+}
+.rail-fab {
+  display: none;
+}
+[data-theme="md3"] .rail-fab {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 40px;
+  border: 0;
+  border-radius: 16px;
+  background-color: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+  box-shadow: var(--md-elev-3);
+  transition: box-shadow 0.2s;
+}
+[data-theme="md3"] .rail-fab:hover {
+  box-shadow: inset 0 0 0 100vmax color-mix(in srgb, currentColor 8%, transparent), var(--md-elev-4);
+}
+[data-theme="md3"] .rail-fab:active {
+  box-shadow: inset 0 0 0 100vmax color-mix(in srgb, currentColor 10%, transparent), var(--md-elev-3);
+}
+/* 有了导航栏 FAB，页头不再重复「新建任务」 */
+[data-theme="md3"] .view-head .btn.primary {
+  display: none;
+}
+[data-theme="md3"] .nav {
+  flex: 1;
+  width: 100%;
+  gap: 12px;
+  align-items: center;
+}
+[data-theme="md3"] .nav-footer {
+  width: 100%;
+  border-top: 0;
+  padding-top: 0;
+}
+[data-theme="md3"] .nav-btn {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  min-height: 56px;
+  padding: 4px 0 0;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 8px;
+  border-radius: 0;
+  background: transparent;
+  color: var(--md-on-surface-variant);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  text-align: center;
+}
+[data-theme="md3"] .nav-btn svg {
+  width: 24px;
+  height: 24px;
+}
+[data-theme="md3"] .nav-btn:hover,
+[data-theme="md3"] .nav-btn.active {
+  background: transparent;
+  color: var(--md-on-surface);
+}
+[data-theme="md3"] .nav-btn.active svg {
+  color: var(--md-on-secondary-container);
+}
+[data-theme="md3"] .nav-btn::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: 0;
+  bottom: auto;
+  left: 50%;
+  width: 56px;
+  height: 32px;
+  margin-left: -28px;
+  border-radius: 16px;
+  background: transparent;
+  transition: background 0.2s;
+}
+[data-theme="md3"] .nav-btn:hover::before {
+  background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+}
+[data-theme="md3"] .nav-btn:active::before {
+  background: color-mix(in srgb, var(--md-on-surface) 10%, transparent);
+}
+/* 选中：指示器从中心横向展开 */
+[data-theme="md3"] .nav-btn.active::before {
+  background: var(--md-secondary-container);
+  animation: md-indicator-in 0.4s var(--md-emphasized);
+}
+@keyframes md-indicator-in {
+  from {
+    transform: scaleX(0.4);
+    opacity: 0;
+  }
+}
+[data-theme="md3"] .nav-btn:focus-visible {
+  outline: 0;
+}
+[data-theme="md3"] .nav-btn:focus-visible::before {
+  outline: 3px solid var(--md-secondary);
+  outline-offset: 2px;
+}
+
+/* ---------- 按钮：高 40、全圆角，主按钮为填充按钮，其余为色调按钮 ---------- */
+[data-theme="md3"] .btn {
+  height: 40px;
+  padding: 0 24px;
+  gap: 8px;
+  border: 0;
+  border-radius: 20px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+}
+[data-theme="md3"] .btn:has(svg) {
+  padding-left: 16px;
+}
+[data-theme="md3"] .btn svg {
+  width: 18px;
+  height: 18px;
+}
+[data-theme="md3"] .btn:active:not(:disabled) {
+  transform: none;
+}
+[data-theme="md3"] .btn:disabled {
+  opacity: 1;
+  background-color: color-mix(in srgb, var(--md-on-surface) 12%, transparent) !important;
+  color: color-mix(in srgb, var(--md-on-surface) 38%, transparent) !important;
+}
+[data-theme="md3"] .btn.glass,
+[data-theme="md3"] .btn.glass:hover:not(:disabled) {
+  background-color: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+}
+[data-theme="md3"] .btn.glass.danger {
+  color: var(--md-error);
+}
+[data-theme="md3"] .btn.primary,
+[data-theme="md3"] .btn.primary:hover:not(:disabled) {
+  background-color: var(--md-primary);
+  color: var(--md-on-primary);
+}
+[data-theme="md3"] .btn.primary:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 100vmax color-mix(in srgb, currentColor 8%, transparent), var(--md-elev-1);
+}
+[data-theme="md3"] .btn.danger-solid {
+  background-color: var(--md-error);
+  color: var(--md-on-error);
+}
+
+/* 图标按钮：40×40 圆形，图标 24 */
+[data-theme="md3"] .icon-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  color: var(--md-on-surface-variant);
+}
+[data-theme="md3"] .icon-btn svg {
+  width: 22px;
+  height: 22px;
+}
+[data-theme="md3"] .icon-btn:hover,
+[data-theme="md3"] .icon-btn.danger:hover {
+  background: transparent;
+  color: var(--md-on-surface-variant);
+}
+[data-theme="md3"] .actions {
+  opacity: 1;
+}
+
+/* ---------- 卡片：Elevated card，圆角 12 ---------- */
+[data-theme="md3"] .tile,
+[data-theme="md3"] .task-card,
+[data-theme="md3"] .task-card.compact {
+  border: 0;
+  border-radius: 12px;
+  background-color: var(--md-surface-low);
+  box-shadow: var(--md-elev-1);
+  transition: box-shadow 0.2s, background-color 0.2s;
+}
+[data-theme="md3"] .task-card:hover,
+[data-theme="md3"] .tile-stat-link:hover,
+[data-theme="md3"] .tile-paste:hover {
+  background-color: var(--md-surface-low);
+  box-shadow: inset 0 0 0 100vmax color-mix(in srgb, var(--md-on-surface) 8%, transparent), var(--md-elev-2);
+}
+[data-theme="md3"] .task-card.checked {
+  background-color: var(--md-secondary-container);
+  box-shadow: var(--md-elev-1);
+}
+[data-theme="md3"] .task-card.compact {
+  border-radius: 12px;
+}
+[data-theme="md3"] .empty {
+  border-radius: 12px;
+  border: 1px solid var(--md-outline-variant);
+  background: transparent;
+}
+[data-theme="md3"] .set-icon {
+  border-radius: 50%;
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+}
+[data-theme="md3"] .pill,
+[data-theme="md3"] .chip {
+  border-radius: 8px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}
+[data-theme="md3"] .pill {
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+}
+
+/* 复选框：18×18、圆角 2、描边 2 */
+[data-theme="md3"] .task-check {
+  inset: auto;
+  left: 50%;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  border-radius: 2px;
+  border: 2px solid var(--md-on-surface-variant);
+  background: var(--md-surface-low);
+}
+[data-theme="md3"] .task-check svg {
+  width: 14px;
+  height: 14px;
+}
+[data-theme="md3"] .task-card.checked .task-check {
+  background: var(--md-primary);
+  border-color: var(--md-primary);
+  color: var(--md-on-primary);
+}
+
+/* ---------- 线性进度：高 4，轨道 secondary container ---------- */
+[data-theme="md3"] .segbar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--md-secondary-container);
+}
+[data-theme="md3"] .segbar.tall {
+  height: 12px;
+  border-radius: 6px;
+}
+[data-theme="md3"] .seg-divider {
+  width: 2px;
+  background: var(--md-surface-low);
+}
+[data-theme="md3"] .compact > .segbar {
+  height: 4px;
+}
+[data-theme="md3"] .bt-progress-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--md-secondary-container);
+}
+
+/* ---------- 开关：轨道 52×32，把手 16 → 24，按住 28 ---------- */
+[data-theme="md3"] .switch {
+  width: 52px;
+  height: 32px;
+  padding: 0;
+  border-radius: 16px;
+  border: 2px solid var(--md-outline);
+  background: var(--md-surface-highest);
+  transition: background 0.2s, border-color 0.2s;
+}
+[data-theme="md3"] .switch span {
+  width: 16px;
+  height: 16px;
+  margin: 6px;
+  background: var(--md-outline);
+  transition: transform 0.3s var(--md-emphasized), width 0.2s var(--md-emphasized), height 0.2s var(--md-emphasized), margin 0.2s var(--md-emphasized), background 0.2s;
+}
+[data-theme="md3"] .switch.on {
+  border-color: var(--md-primary);
+  background: var(--md-primary);
+}
+[data-theme="md3"] .switch.on span {
+  width: 24px;
+  height: 24px;
+  margin: 2px;
+  background: var(--md-on-primary);
+  transform: translateX(20px);
+}
+[data-theme="md3"] .switch:active:not(:disabled) span {
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  transform: translateX(-2px);
+}
+[data-theme="md3"] .switch.on:active:not(:disabled) span {
+  transform: translateX(20px);
+}
+[data-theme="md3"] .switch:hover:not(:disabled) span {
+  background: var(--md-on-surface-variant);
+}
+[data-theme="md3"] .switch.on:hover:not(:disabled) span {
+  background: var(--md-primary-container);
+}
+[data-theme="md3"] .switch:disabled {
+  opacity: 0.38;
+}
+
+/* ---------- 滑块：轨道 4，把手 20 ---------- */
+[data-theme="md3"] .slider {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--md-primary) var(--pct), var(--md-surface-highest) var(--pct));
+}
+[data-theme="md3"] .slider::-webkit-slider-thumb {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  background: var(--md-primary);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--md-primary) 12%, transparent);
+  transition: box-shadow 0.2s;
+}
+[data-theme="md3"] .slider:hover::-webkit-slider-thumb {
+  box-shadow: 0 0 0 10px color-mix(in srgb, var(--md-primary) 8%, transparent);
+}
+[data-theme="md3"] .slider:active::-webkit-slider-thumb {
+  box-shadow: 0 0 0 10px color-mix(in srgb, var(--md-primary) 12%, transparent);
+}
+
+/* ---------- 选中对勾（纸片、分段按钮共用）：宽度从 0 展开 ---------- */
+[data-theme="md3"] :is(.download-filters button, .chips .chip-btn, .view-options-choices button, .segmented button)::before {
+  content: "";
+  flex: none;
+  width: 0;
+  height: 18px;
+  margin-right: 0;
+  background: currentColor;
+  -webkit-mask: var(--md-check) center / 18px no-repeat;
+  mask: var(--md-check) center / 18px no-repeat;
+  transition: width 0.2s var(--md-emphasized), margin 0.2s var(--md-emphasized);
+}
+[data-theme="md3"] :is(.download-filters button.active, .chips .chip-btn.active, .view-options-choices button[aria-pressed="true"], .segmented button.active)::before {
+  width: 18px;
+  margin-right: 8px;
+}
+/* 选中项前已有图标（如卡片 / 列表）时不再加对勾 */
+[data-theme="md3"] .view-options-choices button:has(svg)::before {
+  display: none;
+}
+
+/* ---------- 筛选纸片：高 32、圆角 8；各自变色，不使用滑动背景 ---------- */
+[data-theme="md3"] .download-filters {
+  gap: 8px;
+}
+[data-theme="md3"] .download-filters.has-ind::after,
+[data-theme="md3"] .segmented.has-ind::after {
+  display: none;
+}
+[data-theme="md3"] .download-filters > button,
+[data-theme="md3"] .chips .chip-btn,
+[data-theme="md3"] .view-options-choices button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 16px;
+  border-radius: 8px;
+  border: 1px solid var(--md-outline-variant);
+  background-color: transparent;
+  color: var(--md-on-surface-variant);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+  transition: background-color 0.2s, border-color 0.2s, color 0.2s, padding 0.2s var(--md-emphasized);
+}
+[data-theme="md3"] .download-filters > button:hover {
+  background-color: transparent;
+}
+[data-theme="md3"] .download-filters > button.active,
+[data-theme="md3"] .chips .chip-btn.active,
+[data-theme="md3"] .view-options-choices button[aria-pressed="true"] {
+  padding-left: 8px;
+  border-color: transparent;
+  background-color: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+}
+[data-theme="md3"] .view-options-choices button[aria-pressed="true"]:has(svg) {
+  padding-left: 16px;
+}
+
+/* ---------- 分段按钮：高 40、外框、全圆角，选中显示对勾 ---------- */
+[data-theme="md3"] .segmented {
+  padding: 0;
+  gap: 0;
+  border-radius: 20px;
+  border: 1px solid var(--md-outline);
+  background: transparent;
+  overflow: hidden;
+}
+[data-theme="md3"] .segmented button {
+  height: 38px;
+  padding: 0 16px;
+  gap: 0;
+  border-radius: 0;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+  color: var(--md-on-surface);
+  transition: background-color 0.2s, color 0.2s;
+}
+[data-theme="md3"] .segmented button + button {
+  border-left: 1px solid var(--md-outline);
+}
+[data-theme="md3"] .segmented > button.active {
+  background-color: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+}
+
+/* ---------- 标签页（设置分类、BT 详情）：主标签，指示线与文字同宽 ---------- */
+[data-theme="md3"] .settings-tabs {
+  gap: 0;
+  border-bottom: 1px solid var(--md-surface-highest);
+}
+[data-theme="md3"] .settings-tabs .chip-btn {
+  height: 48px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--md-on-surface-variant);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+}
+[data-theme="md3"] .settings-tabs .chip-btn.active {
+  color: var(--md-primary);
+}
+[data-theme="md3"] .settings-tabs.has-ind::after {
+  width: max(24px, calc(var(--ind-w) - 32px));
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--md-primary);
+  transform: translate(calc(var(--ind-x) + 16px), calc(var(--ind-y) + var(--ind-h) - 3px));
+}
+[data-theme="md3"] .settings-tabs:not(.has-ind) .chip-btn.active {
+  box-shadow: inset 0 -3px 0 var(--md-primary);
+}
+
+/* ---------- 外框文本框：高 56、圆角 4 ---------- */
+[data-theme="md3"] .input {
+  border-radius: 4px;
+  border-color: var(--md-outline);
+  background: transparent;
+  font-size: 16px;
+  line-height: 24px;
+  letter-spacing: 0.5px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+[data-theme="md3"] input.input,
+[data-theme="md3"] select.input {
+  height: 56px;
+  padding: 0 16px;
+}
+[data-theme="md3"] textarea.input {
+  padding: 16px;
+}
+[data-theme="md3"] .input:hover {
+  border-color: var(--md-on-surface);
+}
+[data-theme="md3"] .input:focus {
+  border-color: var(--md-primary);
+  box-shadow: inset 0 0 0 1px var(--md-primary);
+}
+[data-theme="md3"] .input-group {
+  gap: 12px;
+}
+[data-theme="md3"] .input-group .btn {
+  height: 40px;
+}
+
+/* ---------- 对话框：圆角 28，图标与标题居中，操作为文字按钮 ---------- */
+[data-theme="md3"] .modal-mask {
+  background: rgba(0, 0, 0, 0.32);
+}
+[data-theme="md3"] .modal {
+  min-width: 280px;
+  padding: 24px;
+  gap: 16px;
+  border-radius: 28px;
+  background: var(--md-surface-high);
+  box-shadow: var(--md-elev-3);
+}
+[data-theme="md3"] .modal-head {
+  position: relative;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+}
+[data-theme="md3"] .modal-head > div:nth-child(2) {
+  align-self: stretch;
+}
+[data-theme="md3"] .modal-head h2 {
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 400;
+}
+[data-theme="md3"] .modal-head p {
+  margin-top: 4px;
+  font-size: 14px;
+  color: var(--md-on-surface-variant);
+}
+[data-theme="md3"] .modal-icon,
+[data-theme="md3"] .modal-icon.danger {
+  width: 24px;
+  height: 24px;
+  border-radius: 0;
+  background: none;
+  color: var(--md-secondary);
+}
+[data-theme="md3"] .modal-icon.danger {
+  color: var(--md-error);
+}
+[data-theme="md3"] .modal-icon svg {
+  width: 24px;
+  height: 24px;
+}
+[data-theme="md3"] .modal-head .icon-btn {
+  position: absolute;
+  top: -12px;
+  right: -12px;
+}
+[data-theme="md3"] .modal-foot {
+  gap: 8px;
+  padding-top: 8px;
+}
+[data-theme="md3"] .modal-foot .btn,
+[data-theme="md3"] .modal-foot .btn:hover:not(:disabled) {
+  padding: 0 12px;
+  background-color: transparent;
+  color: var(--md-primary);
+}
+[data-theme="md3"] .modal-foot .btn.danger-solid {
+  color: var(--md-error);
+}
+[data-theme="md3"] .modal-foot .btn:disabled {
+  background-color: transparent !important;
+}
+
+/* ---------- 侧边面板（Modal side sheet）：贴右边缘、全高，内侧圆角 16 ---------- */
+[data-theme="md3"] .drawer {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 400px;
+  padding: 24px;
+  border: 0;
+  border-radius: 16px 0 0 16px;
+  background: var(--md-surface-low);
+  box-shadow: var(--md-elev-1);
+  transform: translateX(100%);
+  transition: transform 0.4s var(--md-emphasized);
+}
+[data-theme="md3"] .drawer.show {
+  transform: none;
+}
+[data-theme="md3"] .drawer-mask {
+  background: rgba(0, 0, 0, 0.32);
+}
+[data-theme="md3"] .app:has(.drawer.show) .sidebar,
+[data-theme="md3"] .app:has(.drawer.show) .content {
+  filter: none;
+}
+[data-theme="md3"] .drawer-title .name {
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 400;
+}
+[data-theme="md3"] .drawer .tile {
+  background-color: var(--md-surface-container);
+  box-shadow: none;
+}
+[data-theme="md3"] .drawer-actions {
+  padding-top: 16px;
+  border-top: 1px solid var(--md-outline-variant);
+}
+
+/* ---------- 菜单：圆角 4，项高 48 ---------- */
+[data-theme="md3"] .download-menu,
+[data-theme="md3"] .view-options-panel {
+  border: 0;
+  border-radius: 4px;
+  background: var(--md-surface-container);
+  box-shadow: var(--md-elev-2);
+}
+[data-theme="md3"] .download-menu {
+  min-width: 200px;
+  padding: 8px 0;
+  gap: 0;
+}
+[data-theme="md3"] .download-menu .btn.glass,
+[data-theme="md3"] .download-menu .btn.glass:hover:not(:disabled) {
+  height: 48px;
+  padding: 0 12px;
+  gap: 12px;
+  border-radius: 0;
+  background-color: transparent;
+  color: var(--md-on-surface);
+  font-weight: 400;
+  letter-spacing: 0.5px;
+}
+[data-theme="md3"] .download-menu .btn svg {
+  width: 24px;
+  height: 24px;
+  color: var(--md-on-surface-variant);
+}
+[data-theme="md3"] .download-menu .btn:disabled {
+  background-color: transparent !important;
+}
+[data-theme="md3"] .view-options-panel {
+  padding: 16px;
+}
+[data-theme="md3"] .download-more summary {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 50%;
+}
+[data-theme="md3"] .download-more summary:hover,
+[data-theme="md3"] .download-more[open] summary {
+  background: transparent;
+}
+
+/* ---------- Snackbar 与通知 ---------- */
+[data-theme="md3"] .toast {
+  min-width: 288px;
+  min-height: 48px;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--md-inverse-surface);
+  color: var(--md-inverse-on-surface);
+  font-weight: 400;
+  box-shadow: var(--md-elev-3);
+}
+[data-theme="md3"] .update-notice,
+[data-theme="md3"] .completion-notice {
+  border: 0;
+  border-radius: 12px;
+  background: var(--md-surface-high);
+  box-shadow: var(--md-elev-3);
+}
+
+/* ---------- 下载小窗 ---------- */
+[data-theme="md3"] .capture {
+  border-color: transparent;
+  background: var(--md-surface-container);
+}
+[data-theme="md3"] .cap-url,
+[data-theme="md3"] .cp-stats,
+[data-theme="md3"] .batch-list {
+  border-color: var(--md-outline-variant);
+  border-radius: 12px;
+  background: var(--md-surface-low);
+}
+[data-theme="md3"] .glass-preview {
+  border-radius: 12px;
+}

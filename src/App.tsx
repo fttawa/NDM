@@ -41,8 +41,9 @@ export default function App() {
   useEffect(() => {
     const root = document.documentElement;
     root.dataset.glass = effectiveGlass ?? settings?.glass ?? "acrylic";
+    root.dataset.theme = settings?.theme ?? "default";
     root.dataset.env = isTauri ? "app" : "web";
-  }, [settings?.glass, effectiveGlass]);
+  }, [settings?.glass, settings?.theme, effectiveGlass]);
 
   // 剪贴板监听：窗口获得焦点时检测新的下载链接
   useEffect(() => {

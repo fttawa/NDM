@@ -42,6 +42,7 @@ export function BatchCard({ id }: { id: string }) {
     Promise.all([api.getBatch(id), api.getSettings()]).then(([b, s]) => {
       if (!b) return close();
       document.documentElement.dataset.glass = s.glass;
+      document.documentElement.dataset.theme = s.theme;
       setBatch(b);
       setSelected(new Set(b.items.map((_, i) => i)));
       setDir(s.downloadDir);
