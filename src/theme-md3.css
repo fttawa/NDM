@@ -824,3 +824,62 @@
 [data-theme="md3"] .glass-preview {
   border-radius: 12px;
 }
+
+/* ---------- 下载确认 / 批量小窗：固定窗口尺寸，使用 MD3 紧凑密度 ----------
+   标准尺寸（文本框 56、按钮 40、图标按钮 40）在 460×268 的窗口里放不下，
+   按密度 -4 缩小：文本框 40、按钮 36、图标按钮 32 / 28。 */
+[data-theme="md3"] .capture > * {
+  flex-shrink: 0;
+}
+[data-theme="md3"] .capture .cap-foot,
+[data-theme="md3"] .capture .batch-list,
+[data-theme="md3"] .capture .cap-progress {
+  flex-shrink: 1;
+}
+[data-theme="md3"] .capture input.input {
+  height: 40px;
+  padding: 0 12px;
+  font-size: 14px;
+  line-height: 20px;
+  letter-spacing: 0.25px;
+}
+[data-theme="md3"] .capture .btn,
+[data-theme="md3"] .capture .input-group .btn {
+  height: 36px;
+  padding: 0 16px;
+}
+[data-theme="md3"] .capture .btn:has(svg) {
+  padding-left: 12px;
+}
+[data-theme="md3"] .capture .icon-btn {
+  width: 32px;
+  height: 32px;
+}
+[data-theme="md3"] .capture .icon-btn svg {
+  width: 18px;
+  height: 18px;
+}
+[data-theme="md3"] .capture .capture-controls .icon-btn {
+  width: 28px;
+  height: 28px;
+}
+[data-theme="md3"] .capture .cap-meta {
+  min-width: 0;
+  white-space: nowrap;
+}
+[data-theme="md3"] .capture .cap-meta > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+[data-theme="md3"] .capture .cap-url {
+  line-height: 18px;
+  letter-spacing: 0;
+}
+[data-theme="md3"] .capture .field label {
+  font-weight: 500;
+}
+/* 文件大小等前面几项完整显示，只有最后的来源域名过长时省略 */
+[data-theme="md3"] .capture .cap-meta > :not(:last-child) {
+  flex: none;
+}
