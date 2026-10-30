@@ -1719,7 +1719,9 @@ button {
   box-shadow: var(--overlay-shadow);
   font-size: 13px;
 }
-.view-options-panel:popover-open { display: flex; flex-direction: column; gap: 16px; }
+.view-options-panel:popover-open { display: flex; }
+/* 排版放在基础样式上：收起淡出期间布局保持不变 */
+.view-options-panel { flex-direction: column; gap: 16px; }
 .view-options-title { font-size: 14px; font-weight: 600; }
 .view-options-section { min-width: 0; margin: 0; padding: 0; border: 0; }
 .view-options-section legend { padding: 0; margin-bottom: 8px; color: var(--text-2); font-size: 12px; }
