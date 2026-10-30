@@ -1165,6 +1165,11 @@ button {
 .set-body p {
   margin: 0;
 }
+/* 分段控件直接放在卡片里时按内容宽度显示，不被拉伸成整行 */
+.set-body > .segmented {
+  align-self: flex-start;
+  max-width: 100%;
+}
 .set-row {
   display: flex;
   align-items: center;
