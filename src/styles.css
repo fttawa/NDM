@@ -179,9 +179,10 @@ button {
 .download-more summary { display: flex; align-items: center; padding: 8px; cursor: pointer; border-radius: 8px; list-style: none; color: var(--text-2); }
 .download-more summary::-webkit-details-marker { display: none; }
 .download-more summary:hover, .download-more[open] summary { background: var(--input); color: var(--text); }
-.download-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 10; padding: 6px; border-radius: 12px; min-width: 160px; box-shadow: var(--overlay-shadow); background: var(--tint-solid); }
-.download-menu .btn { width: 100%; justify-content: flex-start; background: transparent; border: 0; }
-.download-menu .btn:hover { background: var(--glass-hover); }
+.download-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 10; display: flex; flex-direction: column; gap: 2px; padding: 6px; border-radius: 12px; min-width: 168px; box-shadow: var(--overlay-shadow); background: var(--tint-solid); }
+/* 菜单项是普通行：去掉 .btn.glass 的底色、边框和模糊（需更高优先级才能覆盖） */
+.download-menu .btn.glass { width: 100%; height: 34px; padding: 0 10px; justify-content: flex-start; gap: 10px; border: 0; border-radius: 8px; background: transparent; backdrop-filter: none; font-weight: 500; }
+.download-menu .btn.glass:hover:not(:disabled) { background: var(--glass-hover); }
 
 /* ============ 主区域 ============ */
 .main {
