@@ -15,6 +15,8 @@ const TARGETS = [
   ".tile-stat-link",
   ".tile-paste",
   ".schedule-task",
+  ".home-row",
+  ".home-more",
 ].join(",");
 
 export function installRipple() {

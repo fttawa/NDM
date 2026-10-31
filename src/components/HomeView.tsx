@@ -1,8 +1,9 @@
-import { ArrowDownToLine, CircleCheck, ClipboardPaste, Gauge, HardDrive, Plus } from "lucide-react";
+import { ArrowDownToLine, ChevronRight, CircleCheck, ClipboardPaste, FolderOpen, Gauge, HardDrive, Plus } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AnimatedNumber, useTween } from "./Animated";
 import { api, readClipboard, type DiskInfo } from "../lib/api";
-import { bytes, extractUrls, speedParts } from "../lib/format";
+import { FileIcon } from "./TaskCard";
+import { ago, bytes, eta, extractUrls, percent, speed, speedParts } from "../lib/format";
 import { HISTORY, SAMPLE_MS, useStore } from "../store";
 
 /**
@@ -202,6 +203,106 @@ function StatsBento() {
   );
 }
 
+const LIST_MAX = 5;
+
+/** 首页下方的两个列表：正在下载、最近完成。点击行打开任务详情。 */
+function HomeLists() {
+  const tasks = useStore((s) => s.tasks);
+  const select = useStore((s) => s.select);
+  const openDownloads = useStore((s) => s.openDownloads);
+  // 「几分钟前」每分钟刷新一次
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const running = tasks
+    .filter((t) => t.status === "active" || t.status === "waiting")
+    .sort((a, b) => (a.status === b.status ? b.speed - a.speed : a.status === "active" ? -1 : 1));
+  const recent = tasks
+    .filter((t) => t.status === "completed")
+    .sort((a, b) => (b.finishedAt ?? 0) - (a.finishedAt ?? 0));
+
+  return (
+    <section className="home-lists">
+      <div className="tile glass home-list">
+        <div className="home-list-head">
+          <div className="tile-label">
+            <ArrowDownToLine size={15} /> 正在下载
+          </div>
+          <button className="home-more" onClick={() => openDownloads("active")}>
+            全部 <ChevronRight size={14} />
+          </button>
+        </div>
+        {running.length === 0 ? (
+          <div className="home-empty muted small">当前没有进行中的下载</div>
+        ) : (
+          running.slice(0, LIST_MAX).map((t) => {
+            const pct = percent(t.downloaded, t.total);
+            return (
+              <button key={t.id} className="home-row" onClick={() => select(t.id)}>
+                <FileIcon name={t.fileName} size={34} />
+                <div className="home-row-main">
+                  <div className="home-row-name" title={t.fileName}>{t.fileName}</div>
+                  <div className={`home-row-bar ${t.status}`}>
+                    <span style={{ width: `${t.total ? pct : 0}%` }} />
+                  </div>
+                </div>
+                <div className="home-row-meta">
+                  {t.status === "waiting" ? (
+                    <span className="muted">排队中</span>
+                  ) : (
+                    <>
+                      <b>{speed(t.speed)}</b>
+                      <span className="muted">{t.total ? `${pct.toFixed(0)}% · ${eta(t.total - t.downloaded, t.speed)}` : bytes(t.downloaded)}</span>
+                    </>
+                  )}
+                </div>
+              </button>
+            );
+          })
+        )}
+      </div>
+
+      <div className="tile glass home-list">
+        <div className="home-list-head">
+          <div className="tile-label">
+            <CircleCheck size={15} /> 最近完成
+          </div>
+          <button className="home-more" onClick={() => openDownloads("completed")}>
+            全部 <ChevronRight size={14} />
+          </button>
+        </div>
+        {recent.length === 0 ? (
+          <div className="home-empty muted small">完成的下载会显示在这里</div>
+        ) : (
+          recent.slice(0, LIST_MAX).map((t) => (
+            <div key={t.id} className="home-row" role="button" tabIndex={0} onClick={() => select(t.id)} onKeyDown={(e) => e.key === "Enter" && select(t.id)}>
+              <FileIcon name={t.fileName} size={34} />
+              <div className="home-row-main">
+                <div className="home-row-name" title={t.fileName}>{t.fileName}</div>
+                <div className="muted small">{bytes(t.total)} · {ago(t.finishedAt, now)}</div>
+              </div>
+              <button
+                className="icon-btn ghost"
+                title="打开所在文件夹"
+                aria-label="打开所在文件夹"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void api.reveal(t.id);
+                }}
+              >
+                <FolderOpen size={16} />
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
 export function HomeView() {
   const openAdd = useStore((s) => s.openAdd);
   return <div className="view">
@@ -210,6 +311,7 @@ export function HomeView() {
       <button className="btn primary" onClick={() => openAdd()}><Plus size={17} /> 新建任务</button>
     </header>
     <StatsBento />
+    <HomeLists />
 
   </div>;
 }

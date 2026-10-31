@@ -883,3 +883,39 @@
 [data-theme="md3"] .capture .cap-meta > :not(:last-child) {
   flex: none;
 }
+
+/* ---------- 首页列表：MD3 列表项 ---------- */
+[data-theme="md3"] .home-list {
+  padding: 16px 8px 8px;
+}
+[data-theme="md3"] .home-row {
+  min-height: 56px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background-image: radial-gradient(
+    circle at var(--rx, 50%) var(--ry, 50%),
+    color-mix(in srgb, currentColor var(--ripple-o), transparent) calc(var(--ripple-r) * 0.92),
+    transparent var(--ripple-r)
+  ) !important;
+}
+[data-theme="md3"] .home-row:hover,
+[data-theme="md3"] .home-more:hover {
+  background-color: transparent;
+  box-shadow: inset 0 0 0 100vmax color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+}
+[data-theme="md3"] .home-row-name {
+  font-size: 14px;
+  font-weight: 500;
+}
+[data-theme="md3"] .home-row-bar {
+  height: 4px;
+  background: var(--md-secondary-container);
+}
+[data-theme="md3"] .home-more {
+  height: 32px;
+  padding: 0 8px 0 12px;
+  border-radius: 16px;
+  color: var(--md-primary);
+  font-size: 14px;
+  font-weight: 500;
+}

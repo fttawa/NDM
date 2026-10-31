@@ -46,6 +46,20 @@ export function dateTime(ms: number | null): string {
   return `${d.getFullYear()}年${p(d.getMonth() + 1)}月${p(d.getDate())}日 ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+/** 相对时间：刚刚 / N 分钟前 / N 小时前 / 昨天 / N 天前，更早显示日期 */
+export function ago(ms: number | null, now = Date.now()): string {
+  if (!ms) return "--";
+  const s = Math.max(0, (now - ms) / 1000);
+  if (s < 60) return "刚刚";
+  if (s < 3600) return `${Math.floor(s / 60)} 分钟前`;
+  if (s < 86400) return `${Math.floor(s / 3600)} 小时前`;
+  const days = Math.floor(s / 86400);
+  if (days === 1) return "昨天";
+  if (days < 7) return `${days} 天前`;
+  const d = new Date(ms);
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
 export function extractUrls(text: string): string[] {
   const re = /(?:https?:\/\/|magnet:\?)[^\s"'<>]+/gi;
   return Array.from(new Set(text.match(re) ?? []));
